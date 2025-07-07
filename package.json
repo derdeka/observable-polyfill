@@ -40,7 +40,7 @@
   "scripts": {
     "minify": "esbuild --bundle --minify index.js > observable.min.js",
     "prepublishOnly": "npm run minify",
-    "test": "echo TODO! Run ./wpt serve --inject-script=../observables-polyfill/observable.js for now."
+    "test": "node ./tests/web-platform-tests.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.2"
