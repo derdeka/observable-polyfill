@@ -245,68 +245,116 @@ const [Observable, Subscriber] = (() => {
 
     // https://wicg.github.io/observable/#observable-from
     static from(value) {
-      // 1. If value is an Observable, then return value.
+      // 1. If Type(value) is not Object, throw a TypeError.
+      if (value === null || typeof value !== "object") throw new TypeError("Observable.from only accepts objects");
+      // 2. From Observable: If value’s specific type is an Observable, then return value.
       if (value instanceof Observable) return value;
 
-      // 2. Let asyncIteratorMethodRecord be GetMethod(value, %Symbol.asyncIterator%).
-      if (Symbol.asyncIterator in value) {
-        try {
-          // 3. If asyncIteratorMethodRecord is a normal completion and asyncIteratorMethodRecord’s [[Value]] is not undefined, then:
-          value[Symbol.asyncIterator](); // trigger a completion record
-          // 3.1. Let nextAlgorithm be the following steps, given iterator:
-          function nextAlgorithm(subscriber, iterator) {
-            // 3.1.1 If iterator’s [[Done]] is true, then:
-            if (iterator.done)
-              // 2.1.1.1 Run subscriber’s complete() method and abort these steps.
-              return subscriber.complete();
-            // 3.1.2 Let nextRecord be IteratorStepValue(iterator).
-            // 3.1.3 Let nextPromise be undefined.
-            let nextPromise = undefined;
-            try {
-              // 3.1.5 Otherwise, set nextPromise to nextRecord’s [[Value]].
-              nextPromise = iterator.next().value;
-              // 3.1.4 If nextRecord is a throw completion then:
-            } catch (e) {
-              // 3.1.4.1 Set nextPromise to a promise rejected with nextRecord’s [[Value]].
-              nextPromise = Promise.reject(e);
-            }
-            // 3.1.6 Upon fulfillment of nextPromise, run the following steps, given resolution:
-            nextPromise
-              .then((resolution) => {
-                // 3.1.6.1. Run subscriber’s next() method, given resolution.
-                subscriber.next(resolution);
-                // 3.1.6.2. Run nextAlgorithm, given iterator.
-                nextAlgorithm(subscriber, iterator);
-              })
-              // 6.1.7 Upon rejection of nextPromise, run the following steps, given rejection:
-              .catch((rejection) => {
-                // 6.1.7.1 Run subscriber’s error() method, given rejection.
-                subscriber.error(rejection);
-              });
+      // 3. Let asyncIteratorMethodRecord be GetMethod(value, %Symbol.asyncIterator%).
+      const asyncIteratorMethodRecord = Symbol.asyncIterator in value && value[Symbol.asyncIterator];
+      // 4. If asyncIteratorMethod’s is undefined or null, then jump to the step labeled From iterable.
+      if (asyncIteratorMethodRecord) {
+        // 5. Let nextAlgorithm be the following steps, given a Subscriber subscriber and an Iterator Record iteratorRecord:
+        function nextAlgorithm(subscriber, iterator) {
+          // 5.1. If subscriber’s subscription controller’s signal is aborted, then return.
+          if (subscriber.signal.aborted) return;
+          // 5.2. Let nextPromise be a Promise-or-undefined, initially undefined.
+          let nextPromise = undefined;
+          // 5.3. Let nextCompletion be IteratorNext(iteratorRecord).
+          let nextCompletion = iterator.next();
+          // 5.4. If nextCompletion is a throw completion, then:
+          if (nextCompletion.type === "throw") {
+            // 5.4.1. Assert: iteratorRecord’s [[Done]] is true.
+            // 5.4.2. Set nextPromise to a promise rejected with nextRecord’s [[Value]].
+            nextPromise = Promise.reject(nextCompletion.value);
           }
-          // 3.2 Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
-          return new Observable((subscriber) => {
-            // 3.2.1 Let iteratorRecord be GetIteratorFromMethod(value, %Symbol.asyncIterator%).
-            try {
-              let iterator = value[Symbol.asyncIterator]();
-              // 3.2.3 Otherwise, queue a microtask to perform the following steps:
-              queueMicrotask(() => {
-                // 3.2.3.1. Run nextAlgorithm given iteratorRecord’s [[Value]].
-                nextAlgorithm(subscriber, iterator);
-              });
-              // 3.2.2 If iteratorRecord is a throw completion then:
-            } catch (e) {
-              // 3.2.2.1 queue a microtask to perform the following steps:
-              queueMicrotask(() => {
-                // 3.2.2.1.1 Run subscriber’s error() method, given iteratorRecord’s [[Value]].
-                subscriber.error(e);
-              });
-            }
-          });
-        } catch (e) {}
+          // 5.5. Otherwise, if nextRecord is normal completion, then set nextPromise to a promise resolved with nextRecord’s [[Value]].
+          else if (nextCompletion.type === "normal") {
+            nextPromise = Promise.resolve(nextCompletion.value);
+          }
+          // 5.6. React to nextPromise:
+          nextPromise
+            // If nextPromise was fulfilled with value iteratorResult, then:
+            .then((iteratorResult) => {
+              // 5.6.1 If Type(iteratorResult) is not Object, then run subscriber’s error() method with a TypeError and abort these steps.
+              if (iteratorResult === null || typeof iteratorResult !== "object") {
+                subscriber.error(new TypeError("Not an IteratorResult."));
+                return;
+              }
+              // 5.6.2 Let done be IteratorComplete(iteratorResult).
+              const done = iteratorResult.done;
+              // 5.6.3 If done is a throw completion, then run subscriber’s error() method with done’s [[Value]] and abort these steps.
+              if (done.type === "throw") {
+                subscriber.error(done.value);
+                return;
+              }
+              // 5.6.4. If done’s [[Value]] is true, then run subscriber’s complete() and abort these steps.
+              if (done.value) {
+                subscriber.complete();
+                return;
+              }
+              // 5.6.5. Let value be IteratorValue(iteratorResult).
+              const value = iteratorResult.value;
+              // 5.6.6. If value is a throw completion, then run subscriber’s error() method with value’s [[Value]] and abort these steps.
+              if (value.type === "throw") {
+                subscriber.error(value.value);
+                return;
+              }
+              // 5.6.7. Run subscriber’s next() given value’s [[Value]].
+              subscriber.next(value.value);
+              // 5.6.8. Run nextAlgorithm given subscriber and iteratorRecord.
+              nextAlgorithm(subscriber, iterator);
+            })
+            // If nextPromise was rejected with reason r, then run subscriber’s error() method given r.
+            .catch((r) => {
+              subscriber.error(r);
+            });
+        }
+
+        // 6. Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
+        return new Observable((subscriber) => {
+          // 6.1. If subscriber’s subscription controller’s signal is aborted, then return.
+          if (subscriber.signal.aborted) return;
+          // 6.2. Let iteratorRecordCompletion be GetIterator(value, async).
+          let iteratorRecordCompletion = asyncIteratorMethodRecord();
+          // 6.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method with iteratorRecordCompletion’s [[Value]] and abort these steps.
+          if (iteratorRecordCompletion.type === "throw") {
+            subscriber.error(iteratorRecordCompletion.value);
+            return;
+          }
+          // 6.4. Let iteratorRecord be ! iteratorRecordCompletion.
+          if (iteratorRecordCompletion.type !== "normal") {
+            // 6.5. Assert: iteratorRecord is an Iterator Record.
+            const iteratorRecord = iteratorRecordCompletion.value;
+            // 6.6. If subscriber’s subscription controller’s signal is aborted, then return.
+            if (subscriber.signal.aborted) return;
+            // 6.7. Add the following abort algorithm to subscriber’s subscription controller’s signal:
+            subscriber.signal.addEventListener("abort", () => {
+              // 6.7.1. Run AsyncIteratorClose(iteratorRecord, NormalCompletion(subscriber’s subscription controller’s abort reason)).
+              // TODO iteratorRecord.closeASubscription(subscriber.signal.reason);
+            });
+            // 6.8. Run nextAlgorithm given subscriber and iteratorRecord.
+            nextAlgorithm(subscriber, iteratorRecord);
+          }
+        });
       }
-      // 4. Let iteratorMethodRecord be GetMethod(value, %Symbol.iterator%).
-      if (Symbol.iterator in value) {
+      // 7. From iterable: Let iteratorMethod be ? GetMethod(value, %Symbol.iterator%).
+      let iteratorMethod = Symbol.iterator in value && value[Symbol.iterator];
+      // 8. If iteratorMethod is undefined, then jump to the step labeled From Promise.
+      if (iteratorMethod) {
+        // Otherwise, return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
+        return new Observable((subscriber) => {
+          // 8.1. If subscriber’s subscription controller’s signal is aborted, then return.
+          if (subscriber.signal.aborted) return;
+          // 8.2. Let iteratorRecordCompletion be GetIterator(value, sync).
+          let iteratorRecordCompletion = iteratorMethod();
+          // 8.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method, given iteratorRecordCompletion’s [[Value]], and abort these steps.
+
+        });
+
+
+
+/*
         try {
           // 5. If iteratorMethodRecord is a normal completion and iteratorMethodRecord’s [[Value]] is not undefined, then:
           value[Symbol.iterator](); // trigger a completion record
@@ -345,6 +393,7 @@ const [Observable, Subscriber] = (() => {
             }
           });
         } catch (e) {}
+*/
       }
 
       // 6. If IsPromise(value) is true, then:
