@@ -317,7 +317,7 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           try {
             // 6.2. Let iteratorRecordCompletion be GetIterator(value, async).
-            let iteratorRecordCompletion = asyncIteratorMethodRecord();
+            let iteratorRecordCompletion = value[Symbol.asyncIterator]();
             // 6.4. Let iteratorRecord be ! iteratorRecordCompletion.
             // 6.5. Assert: iteratorRecord is an Iterator Record.
             const iteratorRecord = iteratorRecordCompletion.value;
@@ -348,7 +348,7 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           try {
             // 8.2. Let iteratorRecordCompletion be GetIterator(value, sync).
-            let iteratorRecordCompletion = iteratorMethod.call(value);
+            let iteratorRecordCompletion = value[Symbol.iterator]();
             // 8.4. Let iteratorRecord be ! iteratorRecordCompletion.
             let iteratorRecord = iteratorRecordCompletion;
             // 8.5 If subscriber’s subscription controller’s signal is aborted, then return.
@@ -391,22 +391,24 @@ const [Observable, Subscriber] = (() => {
       }
 
       // 9. From Promise: If IsPromise(value) is true, then:
-      if (value instanceof Promise) {
+      if (value instanceof Promise || typeof value.then === "function") {
         // 9.1. Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
         return new Observable((subscriber) => {
           // 9.1.1. React to value:
           value
             // 9.1.1.1. If value was fulfilled with value v, then:
-            .then((v) => {
-              // 9.1.1.1.1 Run subscriber’s next() method, given v.
-              subscriber.next(v);
-              // 9.1.1.2 Run subscriber’s complete() method.
-              subscriber.complete();
-            })
-            // 9.1.2 If value was rejected with reason r, then run subscriber’s error() method, given r.
-            .catch((r) => {
-              subscriber.error(r);
-            });
+            .then(
+              (v) => {
+                // 9.1.1.1.1 Run subscriber’s next() method, given v.
+                subscriber.next(v);
+                // 9.1.1.1.2 Run subscriber’s complete() method.
+                subscriber.complete();
+              },
+              // 9.1.1.2 If value was rejected with reason r, then run subscriber’s error() method, given r.
+              (r) => {
+                subscriber.error(r);
+              }
+            );
         });
       }
 
