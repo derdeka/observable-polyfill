@@ -260,17 +260,16 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           // 5.2. Let nextPromise be a Promise-or-undefined, initially undefined.
           let nextPromise = undefined;
-          // 5.3. Let nextCompletion be IteratorNext(iteratorRecord).
-          let nextCompletion = iterator.next();
-          // 5.4. If nextCompletion is a throw completion, then:
-          if (nextCompletion.type === "throw") {
+          try {
+            // 5.3. Let nextCompletion be IteratorNext(iteratorRecord).
+            let nextCompletion = iterator.next();
+            // 5.5. Otherwise, if nextRecord is normal completion, then set nextPromise to a promise resolved with nextRecord’s [[Value]].
+            nextPromise = Promise.resolve(nextCompletion.value);
+          } catch (error) {
+            // 5.4. If nextCompletion is a throw completion, then:
             // 5.4.1. Assert: iteratorRecord’s [[Done]] is true.
             // 5.4.2. Set nextPromise to a promise rejected with nextRecord’s [[Value]].
-            nextPromise = Promise.reject(nextCompletion.value);
-          }
-          // 5.5. Otherwise, if nextRecord is normal completion, then set nextPromise to a promise resolved with nextRecord’s [[Value]].
-          else if (nextCompletion.type === "normal") {
-            nextPromise = Promise.resolve(nextCompletion.value);
+            nextPromise = Promise.reject(error);
           }
           // 5.6. React to nextPromise:
           nextPromise
@@ -281,27 +280,29 @@ const [Observable, Subscriber] = (() => {
                 subscriber.error(new TypeError("Not an IteratorResult."));
                 return;
               }
-              // 5.6.2 Let done be IteratorComplete(iteratorResult).
-              const done = iteratorResult.done;
-              // 5.6.3 If done is a throw completion, then run subscriber’s error() method with done’s [[Value]] and abort these steps.
-              if (done.type === "throw") {
-                subscriber.error(done.value);
+              try {
+                // 5.6.2 Let done be IteratorComplete(iteratorResult).
+                const done = iteratorResult.done;
+                // 5.6.4. If done’s [[Value]] is true, then run subscriber’s complete() and abort these steps.
+                if (done) {
+                  subscriber.complete();
+                  return;
+                }
+              } catch (error) {
+                // 5.6.3 If done is a throw completion, then run subscriber’s error() method with done’s [[Value]] and abort these steps.
+                subscriber.error(error);
                 return;
               }
-              // 5.6.4. If done’s [[Value]] is true, then run subscriber’s complete() and abort these steps.
-              if (done.value) {
-                subscriber.complete();
+              try {
+                // 5.6.5. Let value be IteratorValue(iteratorResult).
+                const value = iteratorResult.value;
+                // 5.6.7. Run subscriber’s next() given value’s [[Value]].
+                subscriber.next(value);
+              } catch (error) {
+                // 5.6.6. If value is a throw completion, then run subscriber’s error() method with value’s [[Value]] and abort these steps.
+                subscriber.error(error);
                 return;
               }
-              // 5.6.5. Let value be IteratorValue(iteratorResult).
-              const value = iteratorResult.value;
-              // 5.6.6. If value is a throw completion, then run subscriber’s error() method with value’s [[Value]] and abort these steps.
-              if (value.type === "throw") {
-                subscriber.error(value.value);
-                return;
-              }
-              // 5.6.7. Run subscriber’s next() given value’s [[Value]].
-              subscriber.next(value.value);
               // 5.6.8. Run nextAlgorithm given subscriber and iteratorRecord.
               nextAlgorithm(subscriber, iterator);
             })
@@ -310,20 +311,14 @@ const [Observable, Subscriber] = (() => {
               subscriber.error(r);
             });
         }
-
         // 6. Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
         return new Observable((subscriber) => {
           // 6.1. If subscriber’s subscription controller’s signal is aborted, then return.
           if (subscriber.signal.aborted) return;
-          // 6.2. Let iteratorRecordCompletion be GetIterator(value, async).
-          let iteratorRecordCompletion = asyncIteratorMethodRecord();
-          // 6.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method with iteratorRecordCompletion’s [[Value]] and abort these steps.
-          if (iteratorRecordCompletion.type === "throw") {
-            subscriber.error(iteratorRecordCompletion.value);
-            return;
-          }
-          // 6.4. Let iteratorRecord be ! iteratorRecordCompletion.
-          if (iteratorRecordCompletion.type !== "normal") {
+          try {
+            // 6.2. Let iteratorRecordCompletion be GetIterator(value, async).
+            let iteratorRecordCompletion = asyncIteratorMethodRecord();
+            // 6.4. Let iteratorRecord be ! iteratorRecordCompletion.
             // 6.5. Assert: iteratorRecord is an Iterator Record.
             const iteratorRecord = iteratorRecordCompletion.value;
             // 6.6. If subscriber’s subscription controller’s signal is aborted, then return.
@@ -331,13 +326,18 @@ const [Observable, Subscriber] = (() => {
             // 6.7. Add the following abort algorithm to subscriber’s subscription controller’s signal:
             subscriber.signal.addEventListener("abort", () => {
               // 6.7.1. Run AsyncIteratorClose(iteratorRecord, NormalCompletion(subscriber’s subscription controller’s abort reason)).
-              // TODO iteratorRecord.closeASubscription(subscriber.signal.reason);
+              iteratorRecord.return?.();
             });
             // 6.8. Run nextAlgorithm given subscriber and iteratorRecord.
             nextAlgorithm(subscriber, iteratorRecord);
+          } catch (error) {
+            // 6.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method with iteratorRecordCompletion’s [[Value]] and abort these steps.
+            subscriber.error(error);
+            return;
           }
         });
       }
+
       // 7. From iterable: Let iteratorMethod be ? GetMethod(value, %Symbol.iterator%).
       let iteratorMethod = Symbol.iterator in value && value[Symbol.iterator];
       // 8. If iteratorMethod is undefined, then jump to the step labeled From Promise.
@@ -346,54 +346,48 @@ const [Observable, Subscriber] = (() => {
         return new Observable((subscriber) => {
           // 8.1. If subscriber’s subscription controller’s signal is aborted, then return.
           if (subscriber.signal.aborted) return;
-          // 8.2. Let iteratorRecordCompletion be GetIterator(value, sync).
-          let iteratorRecordCompletion = iteratorMethod();
-          // 8.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method, given iteratorRecordCompletion’s [[Value]], and abort these steps.
-
-        });
-
-
-
-/*
-        try {
-          // 5. If iteratorMethodRecord is a normal completion and iteratorMethodRecord’s [[Value]] is not undefined, then:
-          value[Symbol.iterator](); // trigger a completion record
-          // 5.1 Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
-          return new Observable((subscriber) => {
-            // 5.1.1 Let iteratorRecord be GetIteratorFromMethod(value, %Symbol.asyncIterator%).
-            try {
-              // 5.1.3 Let iterator be iteratorRecord’s [[Value]].
-              const iterator = value[Symbol.iterator]();
-              // 5.1.4 Repeat:
-              while (true) {
-                const nextRecord = iterator.next();
-                // 5.1.5. If iterator’s [[Done]] is true, then:
-                if (nextRecord.done) {
-                  break;
-                }
-                // 5.1.5.2 Let nextRecord be IteratorStepValue(iterator).
-                try {
-                  // 5.1.5.4. Run subscriber’s next() given nextRecord’s [[Value]].
-                  subscriber.next(nextRecord.value);
-                  // 5.1.5.3. If nextRecord is a throw completion then:
-                } catch (e) {
-                  // 5.1.5.3.1. Run subscriber’s error() method, given nextRecord’s [[Value]].
-                  subscriber.error(e);
-                  // 5.1.5.3.2. Abort these steps.
+          try {
+            // 8.2. Let iteratorRecordCompletion be GetIterator(value, sync).
+            let iteratorRecordCompletion = iteratorMethod.call(value);
+            // 8.4. Let iteratorRecord be ! iteratorRecordCompletion.
+            let iteratorRecord = iteratorRecordCompletion;
+            // 8.5 If subscriber’s subscription controller’s signal is aborted, then return.
+            if (subscriber.signal.aborted) return;
+            // 8.6. Add the following abort algorithm to subscriber’s subscription controller’s signal:
+            subscriber.signal.addEventListener("abort", () => {
+              // 8.6.1. Run IteratorClose(iteratorRecord, NormalCompletion(UNUSED)).
+              iteratorRecord.return?.();
+            });
+            // 8.7. While true:
+            while (true) {
+              try {
+                // 8.7.1. Let next be IteratorStepValue(iteratorRecord).
+                let next = iteratorRecord.next();
+                // 8.7.3. Set next to ! to next.
+                // 8.7.4. If next is done, then:
+                if (next.done) {
+                  // 8.7.4.1. Assert: iteratorRecord’s [[Done]] is true.
+                  // 8.7.4.2. Run subscriber’s complete().
+                  subscriber.complete();
+                  // 8.7.4.3. return
                   return;
                 }
+                // 8.7.5 Run subscriber’s next() given next.
+                subscriber.next(next.value);
+                // 8.7.6. If subscriber’s subscription controller’s signal is aborted, then break.
+                if (subscriber.signal.aborted) break;
+              } catch (error) {
+                // 8.7.2. If next is a throw completion, then run subscriber’s error() method, given next’s [[Value]], and break.
+                subscriber.error(error);
+                break;
               }
-              // 5.1.5.1 Run subscriber’s complete() method and abort these steps.
-              subscriber.complete();
-              // 5.1.2. If iteratorRecord is a throw completion then:
-            } catch (e) {
-              // 5.1.3. Run subscriber’s error() method, given iteratorRecord’s [[Value]].
-              // 5.1.4 Abort these steps.
-              subscriber.error(e);
             }
-          });
-        } catch (e) {}
-*/
+          } catch (error) {
+            // 8.3. If iteratorRecordCompletion is a throw completion, then run subscriber’s error() method, given iteratorRecordCompletion’s [[Value]], and abort these steps.
+            subscriber.error(error);
+            return;
+          }
+        });
       }
 
       // 6. If IsPromise(value) is true, then:
