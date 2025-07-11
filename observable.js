@@ -390,26 +390,27 @@ const [Observable, Subscriber] = (() => {
         });
       }
 
-      // 6. If IsPromise(value) is true, then:
+      // 9. From Promise: If IsPromise(value) is true, then:
       if (value instanceof Promise) {
-        // 6.1. Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
+        // 9.1. Return a new Observable whose subscribe callback is an algorithm that takes a Subscriber subscriber and does the following:
         return new Observable((subscriber) => {
-          // 6.1.1 Upon fulfillment of value, run the following steps, given resolution:
+          // 9.1.1. React to value:
           value
-            .then((resolution) => {
-              // 6.1.1.1 Run subscriber’s next() method, given resolution.
-              subscriber.next(resolution);
-              // 6.1.1.2 Run subscriber’s complete() method.
+            // 9.1.1.1. If value was fulfilled with value v, then:
+            .then((v) => {
+              // 9.1.1.1.1 Run subscriber’s next() method, given v.
+              subscriber.next(v);
+              // 9.1.1.2 Run subscriber’s complete() method.
               subscriber.complete();
             })
-            // 6.1.2 Upon rejection of value, run the following steps, given rejection:
-            .catch((rejection) => {
-              subscriber.error(rejection);
+            // 9.1.2 If value was rejected with reason r, then run subscriber’s error() method, given r.
+            .catch((r) => {
+              subscriber.error(r);
             });
         });
       }
 
-      // 7. Throw a TypeError.
+      // 10. Throw a TypeError.
       throw new TypeError("Could not convert value to Observable");
     }
 
