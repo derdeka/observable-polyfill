@@ -356,7 +356,10 @@ const [Observable, Subscriber] = (() => {
             // 8.6. Add the following abort algorithm to subscriber’s subscription controller’s signal:
             subscriber.signal.addEventListener("abort", () => {
               // 8.6.1. Run IteratorClose(iteratorRecord, NormalCompletion(UNUSED)).
-              iteratorRecord.return?.();
+              const returnResult = iteratorRecord.return?.();
+              if (iteratorRecord.return && (returnResult === null || typeof returnResult !== "object")) {
+                throw new TypeError("Iterator .return() must return an Object");
+              }
             });
             // 8.7. While true:
             while (true) {
