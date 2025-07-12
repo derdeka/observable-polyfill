@@ -44,6 +44,7 @@
     "test-serve": "npx http-server -c1 -t0 --cors --gzip --brotli -o test ."
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.1",
     "esbuild": "^0.25.2"
   }
 }
