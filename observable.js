@@ -1516,12 +1516,12 @@ const [Observable, Subscriber] = (() => {
       // signal, options’s signal if non-null», using AbortSignal, and the
       // current realm.
       let dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", (e) =>
-        dependantAbortController.abort(e.reason),
+      controller.signal.addEventListener("abort", () =>
+        dependantAbortController.abort(controller.signal.reason),
       );
       if (options.signal)
-        options.signal.addEventListener("abort", (e) =>
-          dependantAbortController.abort(e.reason),
+        options.signal.addEventListener("abort", () =>
+          dependantAbortController.abort(options.signal.reason),
         );
       let internalOptions = { signal: dependantAbortController.signal };
       // 4. If internal options’s signal is aborted, then:
@@ -1532,11 +1532,10 @@ const [Observable, Subscriber] = (() => {
         return p;
       }
       // 5. Add the following abort algorithm to internal options’s signal:
-      dependantAbortController.signal.addEventListener("abort", (e) => {
+      internalOptions.signal.addEventListener("abort", () => {
         // Reject p with internal options’s signal's abort reason.
-        reject(e.reason);
+        reject(internalOptions.signal.reason);
       });
-
       // 6. Let idx be an unsigned long long, initially 0.
       let idx = 0;
       // 7. Let observer be a new internal observer, initialized as follows:
