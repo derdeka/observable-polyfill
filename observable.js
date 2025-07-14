@@ -14,7 +14,7 @@ const [Observable, Subscriber] = (() => {
 
   class InternalObserver {
     constructor({ next, error, complete } = {}) {
-      privateState.set(this, { next, error, complete });
+      privateState.set(this, { next, error, complete, subscriberRef: null });
     }
 
     next(value) {
@@ -60,6 +60,11 @@ const [Observable, Subscriber] = (() => {
 
   // https://wicg.github.io/observable/#observable-subscribe-to-an-observable
   function subscribeTo(observable, observer, options = {}) {
+    // 1. If this’s relevant global object is a Window object, and its associated Document is not fully active, then return.
+    if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+      return;
+    }
+
     // 2. Let internal observer be a new internal observer.
     let internalObserver;
 
@@ -82,20 +87,57 @@ const [Observable, Subscriber] = (() => {
       internalObserver = observer || new InternalObserver();
     }
 
-    // 5. Let subscriber be a new Subscriber, initialized as...
-    const subscriber = new Subscriber(internalObserver);
+    // 5. If this’s weak subscriber is not null and this’s weak subscriber’s active is true:
+    const existingSubscriber = privateState.get(internalObserver).subscriberRef?.deref();
+    if (existingSubscriber && privateState.has(existingSubscriber)) {
+      // 5.1. Let subscriber be this’s weak subscriber.
+      // 5.2. Append internal observer to subscriber’s internal observers.
+      privateState.get(existingSubscriber).observers.add(internalObserver);
+      // 5.3. If options’s signal exists, then:
+      if ("signal" in options) {
+        // 5.3.1. If options’s signal is aborted, then remove internal observer from subscriber’s internal observers.
+        if (options.signal.aborted) {
+          privateState.get(existingSubscriber).observers.delete(internalObserver);
+        }
+        // 5.3.2. Otherwise, add the following abort algorithm to options’s signal:
+        else
+          options.signal.addEventListener("abort", () => {
+            // 5.3.2.1. If subscriber’s active is false, then abort these steps.
+            if (!privateState.has(existingSubscriber)) return;
+            // 5.3.2.2. Remove internal observer from subscriber’s internal observers.
+            privateState.get(existingSubscriber).observers.delete(internalObserver);
+            // 5.3.2.3 If subscriber’s internal observers is empty, then close subscriber with options’s signal’s abort reason.
+            if (privateState.get(existingSubscriber).observers.size === 0)
+              closeASubscription(existingSubscriber, options.signal.reason);
+          });
+      }
+      // 5.4. return
+      return;
+    }
 
-    // 6. If options’s signal exists, then:
+    // 6. Let subscriber be a new Subscriber.
+    const subscriber = new Subscriber();
+    // 7. Append internal observer to subscriber’s internal observers.
+    privateState.get(subscriber).observers.add(internalObserver);
+    // 8. Set this’s weak subscriber to subscriber.
+    privateState.get(internalObserver).subscriberRef = new WeakRef(subscriber);
+
+    // 9. If options’s signal exists, then:
     if ("signal" in options) {
-      // 6.1. If options’s signal is aborted, then close subscriber.
+      // 9.1. If options’s signal is aborted, then close subscriber given options’s signal abort reason.
       if (options.signal.aborted)
         closeASubscription(subscriber, options.signal.reason);
-      // 6.2. Otherwise, add the following abort algorithm to options’s signal:
+      // 9.2. Otherwise, add the following abort algorithm to options’s signal:
       else
-        options.signal.addEventListener("abort", () =>
-          // 6.2.1 Close subscriber.
-          closeASubscription(subscriber, options.signal.reason),
-        );
+        options.signal.addEventListener("abort", () => {
+          // 9.2.1. If subscriber’s active is false, then abort these steps.
+          if (!privateState.has(subscriber)) return;
+          // 9.2.2. Remove internal observer from subscriber’s internal observers.
+          privateState.get(subscriber).observers.delete(internalObserver);
+          // 9.2.3. If subscriber’s internal observers is empty, then close subscriber with options’s signal’s abort reason.
+          if (privateState.get(subscriber).observers.size === 0)
+            closeASubscription(subscriber, options.signal.reason);
+      });
     }
 
     const subscribe = privateState.get(observable);
@@ -118,12 +160,9 @@ const [Observable, Subscriber] = (() => {
       return "Subscriber";
     }
 
-    constructor(internalObserver = null) {
-      if (!(internalObserver instanceof InternalObserver)) {
-        throw new TypeError("Illegal constructor");
-      }
+    constructor() {
       privateState.set(this, {
-        observers: new Set([internalObserver]), // TODO refactor
+        observers: new Set(),
         teardowns: [],
         subscriptionController: new AbortController(),
       });
