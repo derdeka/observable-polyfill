@@ -43,15 +43,15 @@ const [Observable, Subscriber] = (() => {
     // 2. Set subscriber’s active boolean to false.
     privateState.delete(subscriber);
 
-    // 3. Signal abort subscriber’s subscription controller with reason, if it
-    // is given.
+    // 3. Signal abort subscriber’s subscription controller with reason, if it is given.
     state.subscriptionController.abort(reason);
 
-    // 4. For each teardown of subscriber’s teardown callbacks sorted in
-    // reverse insertion order:
+    // 4. For each teardown of subscriber’s teardown callbacks sorted in reverse insertion order:
     for (const teardown of state.teardowns.reverse()) {
-      // 4.1. If subscriber’s relevant global object is a Window object, and
-      // its associated Document is not fully active, then abort these steps.
+      // 4.1. If subscriber’s relevant global object is a Window object, and its associated Document is not fully active, then abort these steps.
+      if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+        return;
+      }
 
       // 4.2. Invoke teardown.
       teardown();
