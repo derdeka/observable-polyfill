@@ -123,7 +123,7 @@ const [Observable, Subscriber] = (() => {
         throw new TypeError("Illegal constructor");
       }
       privateState.set(this, {
-        observer: internalObserver,
+        observers: new Set([internalObserver]), // TODO refactor
         teardowns: [],
         subscriptionController: new AbortController(),
       });
@@ -138,8 +138,16 @@ const [Observable, Subscriber] = (() => {
       // 1. If this's active is false, then return.
       if (!privateState.has(this)) return;
 
-      // 3. Run this's next algorithm given value.
-      privateState.get(this).observer.next(value);
+      // 2. If this’s relevant global object is a Window object, and its associated Document is not fully active, then return.
+      if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+        return;
+      }
+
+      // 3. For each observer of this’s internal observers:
+      privateState.get(this).observers.forEach(observer => {
+        // 3.1. Run observer’s next steps given value.
+        observer.next(value);
+      });
     }
 
     // https://wicg.github.io/observable/#dom-subscriber-error
@@ -160,14 +168,16 @@ const [Observable, Subscriber] = (() => {
         return;
       }
 
-      let observer = privateState.get(this).observer;
+      const observers = privateState.get(this).observers;
 
       // 3. Close this.
       closeASubscription(this);
 
       // 4. For each observer of this’s internal observers:
-      // 4.1. Run observer’s error steps given error.
-      observer.error(error);
+      observers.forEach(observer => {
+        // 4.1. Run observer’s error steps given error.
+        observer.error(error);
+      });
     }
 
     // https://wicg.github.io/observable/#dom-subscriber-complete
@@ -178,13 +188,21 @@ const [Observable, Subscriber] = (() => {
       // 1. If this's active is false, then return.
       if (!privateState.has(this)) return;
 
-      let observer = privateState.get(this).observer;
+      // 2. If this’s relevant global object is a Window object, and its associated Document is not fully active, then return.
+      if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+        return;
+      }
+
+      const observers = privateState.get(this).observers;
 
       // 3. Close this.
       closeASubscription(this);
 
-      // 4. Run this's complete algorithm.
-      observer.complete();
+      // 4. For each observer of this’s internal observers:
+      observers.forEach(observer => {
+        // 4.1. Run observer’s complete steps.
+        observer.complete();
+      });
     }
 
     // https://wicg.github.io/observable/#dom-subscriber-addteardown
@@ -195,10 +213,16 @@ const [Observable, Subscriber] = (() => {
       if (typeof teardown != "function") {
         throw new TypeError(`Parameter 1 is not of type 'Function'`);
       }
-      // 2. If this's active is true, then append teardown to this's teardown callbacks list.
+
+      // 1. If this’s relevant global object is a Window object, and its associated Document is not fully active, then return.
+      if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+        return;
+      }
+
+      // 2. If this’s active is true, then append teardown to this’s teardown callbacks list.
       if (privateState.has(this))
         privateState.get(this).teardowns.push(teardown);
-      // 3. Otherwise, invoke teardown.
+      // 3. Otherwise, invoke teardown with «» and "report".
       else teardown();
     }
 
