@@ -43,23 +43,31 @@ const [Observable, Subscriber] = (() => {
     // 2. Set subscriber’s active boolean to false.
     state.active = false;
 
-    // 3. Signal abort subscriber’s subscription controller with reason, if it
-    // is given.
+    // 3. Signal abort subscriber’s subscription controller with reason, if it is given.
     state.subscriptionController.abort(reason);
 
-    // 4. For each teardown of subscriber’s teardown callbacks sorted in
-    // reverse insertion order:
+    // 4. For each teardown of subscriber’s teardown callbacks sorted in reverse insertion order:
     for (const teardown of state.teardowns.reverse()) {
-      // 4.1. If subscriber’s relevant global object is a Window object, and
-      // its associated Document is not fully active, then abort these steps.
-
+      // 4.1. If subscriber’s relevant global object is a Window object, and its associated Document is not fully active, then abort these steps.
+      if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+        return;
+      }
       // 4.2. Invoke teardown.
-      teardown();
+      try {
+        teardown();
+      } catch (e) {
+        reportError(e);
+      }
     }
   }
 
   // https://wicg.github.io/observable/#observable-subscribe-to-an-observable
   function subscribeTo(observable, observer, options = {}) {
+    // 1. If this’s relevant global object is a Window object, and its associated Document is not fully active, then return.
+    if (globalThis.Window && globalThis instanceof Window && !document?.isConnected) {
+      return;
+    }
+
     // 2. Let internal observer be a new internal observer.
     let internalObserver;
 
@@ -337,12 +345,12 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           // 6.7. Add the following abort algorithm to subscriber’s subscription controller’s signal:
           subscriber.signal.addEventListener("abort", () => {
-            // TODO this check is not in the spec, but it is needed to pass the tests; return may not be invoked when iterator is done
-            if (!privateState.get(subscriber)?.active) return;
             // 6.7.1. Run AsyncIteratorClose(iteratorRecord, NormalCompletion(subscriber’s subscription controller’s abort reason)).
-            const returnResult = iteratorRecord.return?.(subscriber.signal.reason);
-            if (iteratorRecord.return && (returnResult === null || typeof returnResult !== "object")) {
-                throw new TypeError("Iterator .return() must return an Object");
+            if (typeof iteratorRecord.return === "function") {
+              const returnResult = iteratorRecord.return(subscriber.signal.reason);
+              if (returnResult === null || typeof returnResult !== "object") {
+                  throw new TypeError("Iterator .return() must return an Object");
+              }
             }
           }, { once: true });
           // 6.8. Run nextAlgorithm given subscriber and iteratorRecord.
@@ -373,12 +381,12 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           // 8.6. Add the following abort algorithm to subscriber’s subscription controller’s signal:
           subscriber.signal.addEventListener("abort", () => {
-            // TODO this check is not in the spec, but it is needed to pass the tests; return may not be invoked when iterator is done
-            if (!privateState.get(subscriber)?.active) return;
             // 8.6.1. Run IteratorClose(iteratorRecord, NormalCompletion(UNUSED)).
-            const returnResult = iteratorRecord.return?.();
-            if (iteratorRecord.return && (returnResult === null || typeof returnResult !== "object")) {
-              throw new TypeError("Iterator .return() must return an Object");
+            if (typeof iteratorRecord.return === "function") {
+              const returnResult = iteratorRecord.return();
+              if (returnResult === null || typeof returnResult !== "object") {
+                throw new TypeError("Iterator .return() must return an Object");
+              }
             }
           }, { once: true });
           // 8.7. While true:
@@ -1537,11 +1545,11 @@ const [Observable, Subscriber] = (() => {
           try {
             passed = predicate(value, idx);
           } catch (e) {
-            // If an exception E was thrown, then reject p with E, and signal abort visitor callback controller with E.
+            // If an exception E was thrown, then reject p with E, and signal abort controller with E.
             reject(e);
             controller.abort(e);
           }
-          // 2. Increment idx.
+          // 2. Set idx to idx + 1.
           idx += 1;
           // 3. If passed is true, then resolve p with true, and signal abort controller.
           if (passed) {
@@ -1558,9 +1566,9 @@ const [Observable, Subscriber] = (() => {
           resolve(false);
         },
       });
-      // 5. Subscribe to this given observer and options.
+      // 8. Subscribe to this given observer and internal options.
       subscribeTo(this, observer, options);
-      // 6. Return p.
+      // 9. Return p.
       return p;
     }
 
