@@ -37,11 +37,11 @@ const [Observable, Subscriber] = (() => {
   // https://wicg.github.io/observable/#close-a-subscription
   function closeASubscription(subscriber, reason) {
     // 1. If subscriber’s active is false, then return.
-    if (!privateState.has(subscriber)) return;
+    if (!privateState.get(subscriber)?.active) return;
 
     const state = privateState.get(subscriber);
     // 2. Set subscriber’s active boolean to false.
-    privateState.delete(subscriber);
+    state.active = false;
 
     // 3. Signal abort subscriber’s subscription controller with reason, if it
     // is given.
@@ -123,6 +123,7 @@ const [Observable, Subscriber] = (() => {
         throw new TypeError("Illegal constructor");
       }
       privateState.set(this, {
+        active: true,
         observer: internalObserver,
         teardowns: [],
         subscriptionController: new AbortController(),
@@ -136,7 +137,7 @@ const [Observable, Subscriber] = (() => {
       if (!arguments.length) throw new TypeError("too few arguments");
 
       // 1. If this's active is false, then return.
-      if (!privateState.has(this)) return;
+      if (!privateState.get(this)?.active) return;
 
       // 3. Run this's next algorithm given value.
       privateState.get(this).observer.next(value);
@@ -150,7 +151,7 @@ const [Observable, Subscriber] = (() => {
       if (!arguments.length) throw new TypeError("too few arguments");
 
       // 1. If this’s active is false, report an exception with error and this’s relevant global object, then return.
-      if (!privateState.has(this)) {
+      if (!privateState.get(this)?.active) {
         reportError(error);
         return;
       };
@@ -163,7 +164,7 @@ const [Observable, Subscriber] = (() => {
       let observer = privateState.get(this).observer;
 
       // 3. Close this.
-      closeASubscription(this);
+      closeASubscription(this, error);
 
       // 4. For each observer of this’s internal observers:
       // 4.1. Run observer’s error steps given error.
@@ -176,7 +177,7 @@ const [Observable, Subscriber] = (() => {
         throw new TypeError("illegal invocation");
 
       // 1. If this's active is false, then return.
-      if (!privateState.has(this)) return;
+      if (!privateState.get(this)?.active) return;
 
       let observer = privateState.get(this).observer;
 
@@ -196,8 +197,9 @@ const [Observable, Subscriber] = (() => {
         throw new TypeError(`Parameter 1 is not of type 'Function'`);
       }
       // 2. If this's active is true, then append teardown to this's teardown callbacks list.
-      if (privateState.has(this))
-        privateState.get(this).teardowns.push(teardown);
+      const state = privateState.get(this);
+      if (state?.active)
+        state.teardowns.push(teardown);
       // 3. Otherwise, invoke teardown.
       else teardown();
     }
@@ -206,7 +208,7 @@ const [Observable, Subscriber] = (() => {
       if (!(this instanceof Subscriber))
         throw new TypeError("illegal invocation");
 
-      return privateState.has(this);
+      return !!privateState.get(this)?.active;
     }
 
     get signal() {
@@ -335,12 +337,14 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           // 6.7. Add the following abort algorithm to subscriber’s subscription controller’s signal:
           subscriber.signal.addEventListener("abort", () => {
+            // TODO this check is not in the spec, but it is needed to pass the tests; return may not be invoked when iterator is done
+            if (!privateState.get(subscriber)?.active) return;
             // 6.7.1. Run AsyncIteratorClose(iteratorRecord, NormalCompletion(subscriber’s subscription controller’s abort reason)).
             const returnResult = iteratorRecord.return?.(subscriber.signal.reason);
             if (iteratorRecord.return && (returnResult === null || typeof returnResult !== "object")) {
                 throw new TypeError("Iterator .return() must return an Object");
             }
-          });
+          }, { once: true });
           // 6.8. Run nextAlgorithm given subscriber and iteratorRecord.
           nextAlgorithm(subscriber, iteratorRecord);
         });
@@ -369,12 +373,14 @@ const [Observable, Subscriber] = (() => {
           if (subscriber.signal.aborted) return;
           // 8.6. Add the following abort algorithm to subscriber’s subscription controller’s signal:
           subscriber.signal.addEventListener("abort", () => {
+            // TODO this check is not in the spec, but it is needed to pass the tests; return may not be invoked when iterator is done
+            if (!privateState.get(subscriber)?.active) return;
             // 8.6.1. Run IteratorClose(iteratorRecord, NormalCompletion(UNUSED)).
             const returnResult = iteratorRecord.return?.();
             if (iteratorRecord.return && (returnResult === null || typeof returnResult !== "object")) {
               throw new TypeError("Iterator .return() must return an Object");
             }
-          });
+          }, { once: true });
           // 8.7. While true:
           while (true) {
             try {
