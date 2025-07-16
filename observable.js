@@ -10,6 +10,8 @@ const [Observable, Subscriber] = (() => {
 
   const reportError = "reportError" in globalThis && globalThis.reportError || console.error;
 
+  const anySignal = (signals) => AbortSignal.any(signals.filter(signal => signal instanceof AbortSignal));
+
   const privateState = new WeakMap();
 
   class InternalObserver {
@@ -950,7 +952,7 @@ const [Observable, Subscriber] = (() => {
               // Run subscriber’s error() method, given the passed in error.
               subscriber.error(value);
             },
-            complete(value) {
+            complete() {
               // 1. If outerSubscriptionHasCompleted is true, run subscriber’s complete() method.
               if (outerSubscriptionHasCompleted) subscriber.complete();
               // 2. Otherwise, set activeInnerAbortController to null.
@@ -961,19 +963,7 @@ const [Observable, Subscriber] = (() => {
           // result of creating a dependent abort signal from the list
           // «activeInnerAbortController’s signal, subscriber’s subscription
           // controller's signal», using AbortSignal, and the current realm.
-          let dependantAbortController = new AbortController();
-          subscriber.signal.addEventListener(
-            "abort",
-            () => dependantAbortController.abort(),
-            { once: true },
-          );
-          if (activeInnerAbortController)
-            activeInnerAbortController.signal.addEventListener(
-              "abort",
-              () => dependantAbortController.abort(),
-              { once: true },
-            );
-          let innerOptions = { signal: dependantAbortController.signal };
+          const innerOptions = { signal: anySignal([activeInnerAbortController.signal, subscriber.signal]) };
           // 6. Subscribe to innerObservable given innerObserver and innerOptions.
           subscribeTo(innerObservable, innerObserver, innerOptions);
         }
@@ -1175,15 +1165,7 @@ const [Observable, Subscriber] = (() => {
       // result of creating a dependent abort signal from the list «visitor
       // callback controller’s signal, options’s signal if non-null», using
       // AbortSignal, and the current realm.
-      let dependantAbortController = new AbortController();
-      visitorCallbackController.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(visitorCallbackController.signal.reason),
-      );
-      if (options.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      let internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([visitorCallbackController.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1. Reject p with internal options’s signal's abort reason.
@@ -1243,15 +1225,7 @@ const [Observable, Subscriber] = (() => {
       // result of creating a dependent abort signal from the list «controller’s
       // signal, options’s signal if non-null», using AbortSignal, and the
       // current realm.
-      let dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(controller.signal.reason),
-      );
-      if (options.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      let internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([controller.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1. Reject p with internal options’s signal's abort reason.
@@ -1315,15 +1289,7 @@ const [Observable, Subscriber] = (() => {
       // result of creating a dependent abort signal from the list «controller’s
       // signal, options’s signal if non-null», using AbortSignal, and the
       // current realm.
-      let dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(controller.signal.reason),
-      );
-      if (options.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      let internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([controller.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1. Reject p with internal options’s signal's abort reason.
@@ -1425,15 +1391,7 @@ const [Observable, Subscriber] = (() => {
       // result of creating a dependent abort signal from the list «controller’s
       // signal, options’s signal if non-null», using AbortSignal, and the
       // current realm.
-      let dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(controller.signal.reason),
-      );
-      if (options.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      let internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([controller.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1. Reject p with internal options’s signal's abort reason.
@@ -1499,15 +1457,7 @@ const [Observable, Subscriber] = (() => {
       // result of creating a dependent abort signal from the list «controller’s
       // signal, options’s signal if non-null», using AbortSignal, and the
       // current realm.
-      let dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(controller.signal.reason),
-      );
-      if (options.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      let internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([controller.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1. Reject p with internal options’s signal's abort reason.
@@ -1571,15 +1521,7 @@ const [Observable, Subscriber] = (() => {
       const controller = new AbortController();
       // 3 Let internal options be a new SubscribeOptions whose signal is the result of creating a dependent
       // abort signal from the list «controller’s signal, options’s signal if non-null», using AbortSignal, and the current realm.
-      const dependantAbortController = new AbortController();
-      controller.signal.addEventListener("abort", () =>
-        dependantAbortController.abort(controller.signal.reason),
-      );
-      if (options?.signal)
-        options.signal.addEventListener("abort", () =>
-          dependantAbortController.abort(options.signal.reason),
-        );
-      const internalOptions = { signal: dependantAbortController.signal };
+      const internalOptions = { signal: anySignal([controller.signal, options?.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1 Reject p with internal options’s signal’s abort reason.
