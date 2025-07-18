@@ -10,7 +10,7 @@ const [Observable, Subscriber] = (() => {
 
   const reportError = "reportError" in globalThis && globalThis.reportError || console.error;
 
-  const anySignal = (signals) => AbortSignal.any(signals.filter(signal => signal instanceof AbortSignal));
+  const anySignal = (signals) => AbortSignal.any(signals.filter(Boolean));
 
   const privateState = new WeakMap();
 
@@ -1509,7 +1509,7 @@ const [Observable, Subscriber] = (() => {
     }
 
     // https://wicg.github.io/observable/#dom-observable-reduce
-    reduce(reducer, initialValue, options) {
+    reduce(reducer, initialValue, options = {}) {
       if (!(this instanceof Observable))
         throw new TypeError("illegal invocation");
       if (typeof reducer !== "function")
@@ -1521,7 +1521,7 @@ const [Observable, Subscriber] = (() => {
       const controller = new AbortController();
       // 3 Let internal options be a new SubscribeOptions whose signal is the result of creating a dependent
       // abort signal from the list «controller’s signal, options’s signal if non-null», using AbortSignal, and the current realm.
-      const internalOptions = { signal: anySignal([controller.signal, options?.signal]) };
+      const internalOptions = { signal: anySignal([controller.signal, options.signal]) };
       // 4. If internal options’s signal is aborted, then:
       if (internalOptions.signal.aborted) {
         // 4.1 Reject p with internal options’s signal’s abort reason.
