@@ -1,0 +1,2114 @@
+<pre class="metadata">
+Title: Observable
+Shortname: observable
+Repository: WICG/observable
+Inline Github Issues: true
+Group: WICG
+Status: CG-DRAFT
+Level: 1
+URL: https://wicg.github.io/observable/
+Boilerplate: omit conformance, omit feedback-header
+Editor: Dominic Farolino, Google https://www.google.com/, domfarolino@gmail.com, https://domfarolino.com
+Abstract: The Observable API provides a composable, ergonomic way of handling an asynchronous stream of events
+!Participate: <a href="https://github.com/WICG/observable">GitHub WICG/observable</a> (<a href="https://github.com/WICG/observable/issues/new">new issue</a>, <a href="https://github.com/WICG/observable/issues?state=open">open issues</a>)
+!Commits: <a href="https://github.com/WICG/observable/commits/master/spec.bs">GitHub spec.bs commits</a>
+Complain About: accidental-2119 yes, missing-example-ids yes
+Indent: 2
+Default Biblio Status: current
+Markup Shorthands: markdown yes
+Assume Explicit For: yes
+WPT Display: open
+</pre>
+
+<pre class="link-defaults">
+</pre>
+<pre class="anchors">
+urlPrefix: https://tc39.es/ecma262/#; spec: ECMASCRIPT
+  type: dfn
+    text: current realm
+    text: Object; url: sec-object-type
+    text: normal completion; url: sec-completion-record-specification-type
+    text: NormalCompletion; url: sec-normalcompletion
+    text: throw completion; url: sec-completion-record-specification-type
+    text: Iterator Record; url: sec-iterator-records
+    url: sec-returnifabrupt-shorthands
+      text: ?
+      text: !
+  type: abstract-op
+    text: Type; url: sec-ecmascript-data-types-and-values
+urlPrefix: https://dom.spec.whatwg.org; spec: DOM
+  type: dfn
+    for: event listener
+      text: type; url: event-listener-type
+      text: capture; url: event-listener-capture
+      text: passive; url: event-listener-passive
+      text: once; url: event-listener-once
+      text: signal; url: event-listener-signal
+    for: AbortSignal
+      text: dependent signals; url: abortsignal-dependent-signals
+      text: signal abort; url:abortsignal-signal-abort
+      text: abort reason; url:abortsignal-abort-reason
+urlPrefix: https://webidl.spec.whatwg.org; spec: WEBIDL
+  type: dfn
+    text: a promise rejected with
+</pre>
+
+<style>
+/* Put nice boxes around each algorithm. */
+[data-algorithm]:not(.heading) {
+  padding: .5em;
+  border: thin solid #ddd; border-radius: .5em;
+  margin: .5em calc(-0.5em - 1px);
+}
+[data-algorithm]:not(.heading) > :first-child {
+  margin-top: 0;
+}
+[data-algorithm]:not(.heading) > :last-child {
+  margin-bottom: 0;
+}
+[data-algorithm] [data-algorithm] {
+  margin: 1em 0;
+}
+
+.selected-text-file-an-issue {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.8);
+  font-size: smaller;
+  padding: 4px 10px;
+  z-index: 4;
+}
+
+dfn var {
+  font-style: italic;
+}
+
+table {
+  margin: 1em 0;
+}
+
+/* WHATWG-style <hr>s, instead of WICG-style. Specific selector is necessary to override WICG styles. */
+:not(.head) > :not(.head) + hr {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 3em 0;
+  height: auto;
+}
+:not(.head) > :not(.head) + hr::before {
+  content: none;
+}
+
+/* WHATWG-style element definition class */
+.element {
+  background: #EEFFEE;
+}
+dt {
+  margin-top: 12px;
+}
+dl, dd {
+  padding-left: .5em;
+}
+
+/* domintro from https://resources.whatwg.org/standard.css */
+.domintro {
+  position: relative;
+  color: green;
+  background: #DDFFDD;
+  margin: 2.5em 0 2em 0;
+  padding: 1.5em 1em 0.5em 2em;
+}
+
+.domintro dt, .domintro dt * {
+  color: black;
+  font-size: inherit;
+}
+.domintro dd {
+  margin: 0.5em 0 1em 2em; padding: 0;
+}
+.domintro dd p {
+  margin: 0.5em 0;
+}
+.domintro::before {
+  content: 'For web developers (non-normative)';
+  background: green;
+  color: white;
+  padding: 0.15em 0.25em;
+  font-style: normal;
+  position: absolute;
+  top: -0.8em;
+  left: -0.8em;
+}
+
+/* .XXX from https://resources.whatwg.org/standard.css */
+.XXX {
+  color: #D50606;
+  background: white;
+  border: solid #D50606;
+}
+</style>
+
+<script src="https://resources.whatwg.org/file-issue.js" async></script>
+
+<h2 id=introduction>Introduction</h2>
+
+*This section is non-normative.*
+
+<h2 id=core-infrastructure>Core infrastructure</h2>
+
+<h3 id=subscriber-api>The {{Subscriber}} interface</h3>
+
+<xmp class=idl>
+[Exposed=*]
+interface Subscriber {
+  undefined next(any value);
+  undefined error(any error);
+  undefined complete();
+  undefined addTeardown(VoidFunction teardown);
+
+  // True after the Subscriber is created, up until either
+  // complete()/error() are invoked, or the subscriber unsubscribes. Inside
+  // complete()/error(), this attribute is true.
+  readonly attribute boolean active;
+
+  readonly attribute AbortSignal signal;
+};
+</xmp>
+
+Each {{Subscriber}} has an [=ordered set=] of <dfn for=Subscriber>internal observers</dfn>,
+initially empty.
+
+Each {{Subscriber}} has a <dfn for=Subscriber>teardown callbacks</dfn>, which is a [=list=] of
+{{VoidFunction}}s, initially empty.
+
+Each {{Subscriber}} has a <dfn for=Subscriber>subscription controller</dfn>, which is an
+{{AbortController}}.
+
+Each {{Subscriber}} has a <dfn for=Subscriber>active</dfn> boolean, initially true.
+
+Note: This is a bookkeeping variable to ensure that a {{Subscriber}} never calls any of the
+callbacks it owns after it has been [=close a subscription|closed=].
+
+The <dfn attribute for=Subscriber><code>active</code></dfn> getter steps are to return [=this=]'s
+[=Subscriber/active=] boolean.
+
+The <dfn attribute for=Subscriber><code>signal</code></dfn> getter steps are to return [=this=]'s
+[=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+<div algorithm>
+  The <dfn for=Subscriber method><code>next(|value|)</code></dfn> method steps are:
+
+    1. If [=this=]'s [=Subscriber/active=] is false, then return.
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. [=set/For each=] |observer| of [=this=]'s [=Subscriber/internal observers=]:
+
+       1. Run |observer|'s [=internal observer/next steps=] given |value|.
+
+          [=Assert=]: No <a spec=webidl lt="an exception was thrown">exception was thrown</a>.
+
+          <div class=note>
+            <p>Note: No exception can be thrown here because in the case where the
+            [=Subscriber/internal observer=]'s [=internal observer/next steps=] is just a wrapper
+            around a script-provided callback, the <a href=#process-observer>process observer</a>
+            steps take care to wrap these callbacks in logic that, when invoking them, catches any
+            exceptions, and reports them to the global.</p>
+
+            <p>When the [=internal observer/next steps=] is a spec algorithm, those steps take care
+            to not throw any exceptions outside of itself, to appease this assert.</p>
+          </div>
+</div>
+
+<div algorithm>
+  The <dfn for=Subscriber method><code>error(|error|)</code></dfn> method steps are:
+
+    1. If [=this=]'s [=Subscriber/active=] is false, [=report an exception=] with |error| and
+       [=this=]'s [=relevant global object=], then return.
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. [=close a subscription|Close=] [=this=].
+
+    1. [=set/For each=] |observer| of [=this=]'s [=Subscriber/internal observers=]:
+
+       1. Run |observer|'s [=internal observer/error steps=] given |error|.
+
+          [=Assert=]: No <a spec=webidl lt="an exception was thrown">exception was thrown</a>.
+
+          Note: See the documentation in {{Subscriber/next()}} for details on why this is true.
+</div>
+
+<div algorithm>
+  The <dfn for=Subscriber method><code>complete()</code></dfn> method steps are:
+
+    1. If [=this=]'s [=Subscriber/active=] is false, then return.
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. [=close a subscription|Close=] [=this=].
+
+    1. [=set/For each=] |observer| of [=this=]'s [=Subscriber/internal observers=]:
+
+       1. Run |observer|'s [=internal observer/complete steps=].
+
+          [=Assert=]: No <a spec=webidl lt="an exception was thrown">exception was thrown</a>.
+
+          Note: See the documentation in {{Subscriber/next()}} for details on why this is true.
+</div>
+
+<div algorithm>
+  The <dfn for=Subscriber method><code>addTeardown(|teardown|)</code></dfn> method steps are:
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. If [=this=]'s [=Subscriber/active=] is true, then [=list/append=] |teardown| to [=this=]'s
+       [=Subscriber/teardown callbacks=] list.
+
+    1. Otherwise, [=invoke=] |teardown| with «» and "`report`".
+</div>
+
+<div algorithm>
+  To <dfn>close a subscription</dfn> given a {{Subscriber}} |subscriber|, and an optional {{any}}
+  |reason|, run these steps:
+
+    1. If |subscriber|'s [=Subscriber/active=] is false, then return.
+
+       <div class=note>
+         <p>This guards against re-entrant invocation, which can happen in the "producer-initiated"
+         unsubscription case. Consider the following example:</p>
+         <div class=example id=re-entrant-close>
+           <pre highlight=js>
+const outerController = new AbortController();
+const observable = new Observable(subscriber =&gt; {
+  subscriber.addTeardown(() =&gt; {
+    // 2.) This teardown executes inside the "Close" algorithm, while it's
+    //     running. Aborting the downstream signal run its abort algorithms,
+    //     one of which is the currently-running "Close" algorithm.
+    outerController.abort();
+  });
+
+  // 1.) This immediately invokes the "Close" algorithm, which
+  //     sets subscriber.active to false.
+  subscriber.complete();
+});
+
+observable.subscribe({}, {signal: outerController.signal});
+           </pre>
+         </div>
+       </div>
+
+    1. Set |subscriber|'s [=Subscriber/active=] boolean to false.
+
+    1. [=AbortSignal/Signal abort=] |subscriber|'s [=Subscriber/subscription controller=] with
+       |reason|, if it is given.
+
+    1. [=list/For each=] |teardown| of |subscriber|'s [=Subscriber/teardown callbacks=] sorted in
+       reverse insertion order:
+
+       1. If |subscriber|'s [=relevant global object=] is a {{Window}} object, and its [=associated
+          Document=] is not [=Document/fully active=], then abort these steps.
+
+          Note: This step runs repeatedly because each |teardown| could result in the above
+          {{Document}} becoming inactive.
+
+       1. [=Invoke=] |teardown| with «» and "`report`".
+</div>
+
+<h3 id=observable-api>The {{Observable}} interface</h3>
+
+<xmp class=idl>
+// SubscribeCallback is where the Observable "creator's" code lives. It's
+// called when subscribe() is called, to set up a new subscription.
+callback SubscribeCallback = undefined (Subscriber subscriber);
+callback ObservableSubscriptionCallback = undefined (any value);
+
+dictionary SubscriptionObserver {
+  ObservableSubscriptionCallback next;
+  ObservableSubscriptionCallback error;
+  VoidFunction complete;
+};
+
+callback ObservableInspectorAbortHandler = undefined (any value);
+
+dictionary ObservableInspector {
+  ObservableSubscriptionCallback next;
+  ObservableSubscriptionCallback error;
+  VoidFunction complete;
+
+  VoidFunction subscribe;
+  ObservableInspectorAbortHandler abort;
+};
+
+typedef (ObservableSubscriptionCallback or SubscriptionObserver) ObserverUnion;
+typedef (ObservableSubscriptionCallback or ObservableInspector) ObservableInspectorUnion;
+
+dictionary SubscribeOptions {
+  AbortSignal signal;
+};
+
+callback Predicate = boolean (any value, unsigned long long index);
+callback Reducer = any (any accumulator, any currentValue, unsigned long long index);
+callback Mapper = any (any value, unsigned long long index);
+// Differs from Mapper only in return type, since this callback is exclusively
+// used to visit each element in a sequence, not transform it.
+callback Visitor = undefined (any value, unsigned long long index);
+
+// This callback returns an `any` that must convert into an `Observable`, via
+// the `Observable` conversion semantics.
+callback CatchCallback = any (any value);
+
+[Exposed=*]
+interface Observable {
+  constructor(SubscribeCallback callback);
+  undefined subscribe(optional ObserverUnion observer = {}, optional SubscribeOptions options = {});
+
+  // Constructs a native Observable from value if it's any of the following:
+  //   - Observable
+  //   - AsyncIterable
+  //   - Iterable
+  //   - Promise
+  static Observable from(any value);
+
+  // Observable-returning operators. See "Operators" section in the spec.
+  //
+  // takeUntil() can consume promises, iterables, async iterables, and other
+  // observables.
+  Observable takeUntil(any value);
+  Observable map(Mapper mapper);
+  Observable filter(Predicate predicate);
+  Observable take(unsigned long long amount);
+  Observable drop(unsigned long long amount);
+  Observable flatMap(Mapper mapper);
+  Observable switchMap(Mapper mapper);
+  Observable inspect(optional ObservableInspectorUnion inspectorUnion = {});
+  Observable catch(CatchCallback callback);
+  Observable finally(VoidFunction callback);
+
+  // Promise-returning operators.
+  Promise<sequence<any>> toArray(optional SubscribeOptions options = {});
+  Promise<undefined> forEach(Visitor callback, optional SubscribeOptions options = {});
+  Promise<boolean> every(Predicate predicate, optional SubscribeOptions options = {});
+  Promise<any> first(optional SubscribeOptions options = {});
+  Promise<any> last(optional SubscribeOptions options = {});
+  Promise<any> find(Predicate predicate, optional SubscribeOptions options = {});
+  Promise<boolean> some(Predicate predicate, optional SubscribeOptions options = {});
+  Promise<any> reduce(Reducer reducer, optional any initialValue, optional SubscribeOptions options = {});
+};
+</xmp>
+
+Each {{Observable}} has a <dfn for=Observable>subscribe callback</dfn>, which is a
+{{SubscribeCallback}} or a set of steps that take in a {{Subscriber}}.
+
+Each {{Observable}} has a <dfn for=Observable>weak subscriber</dfn>, which is a weak reference to a
+{{Subscriber}}-or-null, initially null.
+
+Note: The "union" of these types is to support both {{Observable}}s created by JavaScript (that are
+always constructed with a {{SubscribeCallback}}), and natively-constructed {{Observable}} objects
+(whose [=Observable/subscribe callback=] could be an arbitrary set of native steps, not a JavaScript
+callback). The return value of {{EventTarget/when()}} is an example of the latter.
+
+<div algorithm>
+  The <dfn for=Observable constructor lt="Observable(callback)"><code>new
+  Observable(|callback|)</code></dfn> constructor steps are:
+
+    1. Set [=this=]'s [=Observable/subscribe callback=] to |callback|.
+
+      Note: This callback will get invoked later when {{Observable/subscribe()}} is called.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>subscribe(|observer|, |options|)</code></dfn> method steps
+  are:
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |options|.
+</div>
+
+<h4 id=observable-supporting-concepts>Supporting concepts</h4>
+
+<div algorithm>
+  The <dfn>default error algorithm</dfn> is an algorithm that takes an {{any}} |error|, and runs
+  these steps:
+
+    1. [=Report an exception=] with |error| and the [=current realm=]'s [=realm/global object=].
+
+  Note: We pull this default out separately so that every place in this specification that natively
+  <a for=Observable lt="subscribe to an Observable">subscribes</a> to an {{Observable}} (i.e.,
+  subscribes from spec prose, not going through the {{Observable/subscribe()}} method) doesn't have
+  to redundantly define these steps.
+</div>
+
+An <dfn>internal observer</dfn> is a [=struct=] with the following [=struct/items=]:
+
+<dl dfn-for="internal observer">
+  : <dfn>next steps</dfn>
+  :: An algorithm that takes a single parameter of type {{any}}. Initially, these steps do nothing.
+
+  : <dfn>error steps</dfn>
+  :: An algorithm that takes a single parameter of type {{any}}. Initially, the [=default error
+     algorithm=].
+
+  : <dfn>complete steps</dfn>
+  :: An algorithm with no parameters. Initially, these steps do nothing.
+</dl>
+
+<div class=note>
+  <p>The [=internal observer=] [=struct=] is used to mirror the {{SubscriptionObserver/next}},
+  {{SubscriptionObserver/error}}, and {{SubscriptionObserver/complete}} [=callback functions=]. For
+  any {{Observable}} that is subscribed by JavaScript via the {{Observable/subscribe()}} method,
+  these algorithm "steps" will just be a wrapper around [=invoking=] the corresponding
+  {{SubscriptionObserver/next}}, {{SubscriptionObserver/error}}, and
+  {{SubscriptionObserver/complete}} [=callback functions=] provided by script.</p>
+
+  <p>But when internal spec prose (not user script) <a for=Observable lt="subscribe to an
+  Observable">subscribes</a> to an {{Observable}}, these "steps" are arbitrary spec algorithms that
+  are not provided via an {{ObserverUnion}} packed with Web IDL [=callback functions=]. See the
+  [[#promise-returning-operators]] that make use of this, for example.</p>
+</div>
+
+<div algorithm>
+  To <dfn for=Observable>convert to an Observable</dfn> an {{any}} |value|, run these steps:
+
+  Note: We split this algorithm out from the Web IDL {{Observable/from()}} method, so that spec
+  prose can <a for=Observable lt="convert to an observable">convert</a> values to without going
+  through the Web IDL bindings.
+
+    1. If [$Type$](|value|) is not [=Object=], [=exception/throw=] a {{TypeError}}.
+
+       Note: This prevents primitive types from being coerced into iterables (e.g., String). See
+       discussion in <a href=https://github.com/WICG/observable/issues/125>WICG/observable#125</a>.
+
+    1. <i id=from-observable-conversion><b>From Observable</b></i>: If |value|'s [=specific type=]
+       is an {{Observable}}, then return |value|.
+
+    1. <i id=from-async-iterable-conversion><b>From async iterable</b></i>: Let
+       |asyncIteratorMethod| be [=?=] [$GetMethod$](|value|, {{%Symbol.asyncIterator%}}).
+
+       Note: We use [$GetMethod$] instead of [$GetIterator$] because we're only probing for async
+       iterator protocol support, and we don't want to throw if it's not implemented.
+       [$GetIterator$] throws errors in BOTH of the following cases: (a) no iterator protocol is
+       implemented, (b) an iterator protocol is implemented, but isn't callable or its getter
+       throws. [$GetMethod$] lets us ONLY throw in the latter case.
+
+    1. If |asyncIteratorMethod|'s is undefined or null, then jump to the step labeled <a
+       href=#from-iterable-conversion>From iterable</a>.
+
+    1. Let |nextAlgorithm| be the following steps, given a {{Subscriber}} |subscriber| and an
+       [=Iterator Record=] |iteratorRecord|:
+
+         1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+            [=AbortSignal/aborted=], then return.
+
+         1. Let |nextPromise| be a {{Promise}}-or-undefined, initially undefined.
+
+         1. Let |nextCompletion| be [$IteratorNext$](|iteratorRecord|).
+
+            Note: We use [$IteratorNext$] here instead of [$IteratorStepValue$], because
+            [$IteratorStepValue$] expects the iterator's `next()` method to return an object that
+            can immediately be inspected for a value, whereas in the async iterator case, `next()`
+            is expected to return a Promise/thenable (which we wrap in a Promise and react to to get
+            that value).
+
+         1. If |nextCompletion| is a [=throw completion=], then:
+
+            1. [=Assert=]: |iteratorRecord|'s \[[Done]] is true.
+
+            1. Set |nextPromise| to [=a promise rejected with=] |nextRecord|'s \[[Value]].
+
+         1. Otherwise, if |nextRecord| is [=normal completion=], then set |nextPromise| to [=a
+            promise resolved with=] |nextRecord|'s \[[Value]].
+
+            Note: This is done in case |nextRecord|'s \[[Value]] is not *itself* already a
+            {{Promise}}.
+
+         1. [=promise/React=] to |nextPromise|:
+
+             * If |nextPromise| was fulfilled with value |iteratorResult|, then:
+
+               1. If [$Type$](|iteratorResult|) is not Object, then run |subscriber|'s
+                  {{Subscriber/error()}} method with a {{TypeError}} and abort these steps.
+
+               1. Let |done| be [$IteratorComplete$](|iteratorResult|).
+
+               1. If |done| is a [=throw completion=], then run |subscriber|'s
+                  {{Subscriber/error()}} method with |done|'s \[[Value]] and abort these steps.
+
+               1. If |done|'s \[[Value]] is true, then run |subscriber|'s {{Subscriber/complete()}}
+                  and abort these steps.
+
+               1. Let |value| be [$IteratorValue$](|iteratorResult|).
+
+               1. If |value| is a [=throw completion=], then run |subscriber|'s
+                  {{Subscriber/error()}} method with |value|'s \[[Value]] and abort these steps.
+
+               1. Run |subscriber|'s {{Subscriber/next()}} given |value|'s \[[Value]].
+
+               1. Run |nextAlgorithm| given |subscriber| and |iteratorRecord|.
+
+             * If |nextPromise| was rejected with reason |r|, then run |subscriber|'s
+               {{Subscriber/error()}} method given |r|.
+
+    1. Return a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an algorithm that
+       takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+          [=AbortSignal/aborted=], then return.
+
+       1. Let |iteratorRecordCompletion| be [$GetIterator$](|value|, async).
+
+          Note: This both re-invokes any {{%Symbol.asyncIterator%}} method getters on |value|—note
+          that whether this is desirable is an extreme corner case, but it matches test
+          expectations; see <a href=https://github.com/WICG/observable/issues/127>issue#127</a> for
+          discussion—and invokes the protocol itself to obtain an [=Iterator Record=].
+
+       1. If |iteratorRecordCompletion| is a [=throw completion=], then run |subscriber|'s
+          {{Subscriber/error()}} method with |iteratorRecordCompletion|'s \[[Value]] and abort these
+          steps.
+
+          Note: This means we invoke the {{Subscriber/error()}} method synchronously with respect to
+          subscription, which is the only time this can happen for async iterables that are
+          converted to {{Observable}}s. In all other cases, errors are propagated to the observer
+          asynchronously, with microtask timing, by virtue of being wrapped in a rejected
+          {{Promise}} that |nextAlgorithm| [=promise/reacts=] to. This synchronous-error-propagation
+          behavior is consistent with language constructs, i.e., **for-await of** loops that invoke
+          {{%Symbol.asyncIterator%}} and synchronously re-throw exceptions to catch blocks outside
+          the loop, before any [$Await|Awaiting$] takes place.
+
+       1. Let |iteratorRecord| be [=!=] |iteratorRecordCompletion|.
+
+       1. [=Assert=]: |iteratorRecord| is an [=Iterator Record=].
+
+       1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+          [=AbortSignal/aborted=], then return.
+
+       1. [=AbortSignal/add|Add the following abort algorithm=] to |subscriber|'s
+          [=Subscriber/subscription controller=]'s [=AbortController/signal=]:
+
+          1. Run [$AsyncIteratorClose$](|iteratorRecord|, [=NormalCompletion=](|subscriber|'s
+             [=Subscriber/subscription controller=]'s [=AbortSignal/abort reason=])).
+
+       1. Run |nextAlgorithm| given |subscriber| and |iteratorRecord|.
+
+    1. <i id=from-iterable-conversion><b>From iterable</b></i>: Let |iteratorMethod| be [=?=]
+       [$GetMethod$](|value|, {{%Symbol.iterator%}}).
+
+    1. If |iteratorMethod| is undefined, then jump to the step labeled <a
+       href=#from-promise-conversion>From Promise</a>.
+
+       Otherwise, return a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+         1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+            [=AbortSignal/aborted=], then return.
+
+         1. Let |iteratorRecordCompletion| be [$GetIterator$](|value|, sync).
+
+         1. If |iteratorRecordCompletion| is a [=throw completion=], then run |subscriber|'s
+            {{Subscriber/error()}} method, given |iteratorRecordCompletion|'s \[[Value]], and abort
+            these steps.
+
+         1. Let |iteratorRecord| be [=!=] |iteratorRecordCompletion|.
+
+         1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+            [=AbortSignal/aborted=], then return.
+
+         1. [=AbortSignal/add|Add the following abort algorithm=] to |subscriber|'s
+            [=Subscriber/subscription controller=]'s [=AbortController/signal=]:
+
+            1. Run [$IteratorClose$](|iteratorRecord|, [=NormalCompletion=](UNUSED)).
+
+         1. [=iteration/While=] true:
+
+            1. Let |next| be [$IteratorStepValue$](|iteratorRecord|).
+
+            1. If |next| is a [=throw completion=], then run |subscriber|'s {{Subscriber/error()}}
+               method, given |next|'s \[[Value]], and [=iteration/break=].
+
+            1. Set |next| to [=!=] to |next|.
+
+            1. If |next| is done, then:
+
+               1. [=Assert=]: |iteratorRecord|'s \[[Done]] is true.
+
+               2. Run |subscriber|'s {{Subscriber/complete()}}.
+
+               3. Return.
+
+            1. Run |subscriber|'s {{Subscriber/next()}} given |next|.
+
+            1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=]
+               is [=AbortSignal/aborted=], then [=iteration/break=].
+
+    1. <i id=from-promise-conversion><b>From Promise</b></i>: If [$IsPromise$](|value|) is true,
+       then:
+
+       1. Return a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an algorithm
+          that takes a {{Subscriber}} |subscriber| and does the following:
+
+          1. [=promise/React=] to |value|:
+
+             1. If |value| was fulfilled with value |v|, then:
+
+                1. Run |subscriber|'s {{Subscriber/next()}} method, given |v|.
+
+                1. Run |subscriber|'s {{Subscriber/complete()}} method.
+
+             1. If |value| was rejected with reason |r|, then run |subscriber|'s
+                {{Subscriber/error()}} method, given |r|.
+
+    1. [=exception/Throw=] a {{TypeError}}.
+
+<wpt>
+  /dom/observable/tentative/observable-from.any.js
+</wpt>
+</div>
+
+<div algorithm>
+  To <dfn for=Observable>subscribe to an {{Observable}}</dfn> given an
+  {{ObserverUnion}}-or-[=internal observer=] |observer|, and a {{SubscribeOptions}} |options|, run
+  these steps:
+
+  Note: We split this algorithm out from the Web IDL {{Observable/subscribe()}} method, so that spec
+  prose can <a for=Observable lt="subscribe to an Observable">subscribe</a> to an {{Observable}}
+  without going through the Web IDL bindings. See <a
+  href=https://github.com/w3c/IntersectionObserver/issues/464>w3c/IntersectionObserver#464</a> for
+  similar context, where "internal" prose <span class=allow-2119>must</span> not go through Web IDL
+  bindings on objects whose properties could be mutated by JavaScript. See
+  [[#promise-returning-operators]] for usage of this.
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. Let |internal observer| be a new [=internal observer=].
+
+    1. Process |observer| as follows:
+       <ol id=process-observer>
+         <li>
+           <dl class="switch">
+             <dt>If |observer| is an {{ObservableSubscriptionCallback}}</dt>
+             <dd>Set |internal observer|'s [=internal observer/next steps=] to these steps that take
+             an {{any}} |value|:
+
+                 1. [=Invoke=] |observer| with «|value|» and "`report`".
+             </dd>
+
+             <dt>If |observer| is a {{SubscriptionObserver}}</dt>
+             <dd>
+               1. If |observer|'s {{SubscriptionObserver/next}} [=map/exists=], then set |internal
+                  observer|'s [=internal observer/next steps=] to these steps that take an {{any}}
+                  |value|:
+
+                  1. [=Invoke=] |observer|'s {{SubscriptionObserver/next}} with «|value|» and
+                     "`report`".
+
+               1. If |observer|'s {{SubscriptionObserver/error}} [=map/exists=], then set |internal
+                  observer|'s [=internal observer/error steps=] to these steps that take an {{any}}
+                  |error|:
+
+                  1. [=Invoke=] |observer|'s {{SubscriptionObserver/error}} with «|error|» and
+                     "`report`".
+
+               1. If |observer|'s {{SubscriptionObserver/complete}} [=map/exists=], then set
+                  |internal observer|'s [=internal observer/complete steps=] to these steps:
+
+                  1. [=Invoke=] |observer|'s {{SubscriptionObserver/complete}} with «» and
+                     "`report`".
+             </dd>
+
+             <dt>If |observer| is an [=internal observer=]</dt>
+             <dd>Set |internal observer| to |observer|.</dd>
+           </dl>
+         </li>
+       </ol>
+
+    1. [=Assert=]: |internal observer|'s [=internal observer/error steps=] is either the [=default
+       error algorithm=], or an algorithm that [=invokes=] the provided
+       {{SubscriptionObserver/error}} [=callback function=].
+
+    1. If [=this=]'s [=Observable/weak subscriber=] is not null and [=this=]'s [=Observable/weak
+       subscriber=]'s [=Subscriber/active=] is true:
+
+       1. Let |subscriber| be [=this=]'s [=Observable/weak subscriber=].
+
+       1. [=set/Append=] |internal observer| to |subscriber|'s [=Subscriber/internal observers=].
+
+       1. If |options|'s {{SubscribeOptions/signal}} [=map/exists=], then:
+
+          1. If |options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then
+             [=set/remove=] |internal observer| from |subscriber|'s [=Subscriber/internal
+             observers=].
+
+          1. Otherwise, [=AbortSignal/add|add the following abort algorithm=] to |options|'s
+             {{SubscribeOptions/signal}}:
+
+             1. If |subscriber|'s [=Subscriber/active=] is false, then abort these steps.
+
+             1. [=set/Remove=] |internal observer| from |subscriber|'s [=Subscriber/internal
+                observers=].
+
+             1. If |subscriber|'s [=Subscriber/internal observers=] is [=set/empty=], then [=close a
+                subscription|close=] |subscriber| with |options|'s {{SubscribeOptions/signal}}'s
+                [=AbortSignal/abort reason=].
+
+       1. Return.
+
+    1. Let |subscriber| be a [=new=] {{Subscriber}}.
+
+    1. [=set/Append=] |internal observer| to |subscriber|'s [=Subscriber/internal observers=].
+
+    1. Set [=this=]'s [=Observable/weak subscriber=] to |subscriber|.
+
+    1. If |options|'s {{SubscribeOptions/signal}} [=map/exists=], then:
+
+       1. If |options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then [=close a
+          subscription|close=] |subscriber| given |options|'s {{SubscribeOptions/signal}}
+          [=AbortSignal/abort reason=].
+
+       1. Otherwise, [=AbortSignal/add|add the following abort algorithm=] to |options|'s
+          {{SubscribeOptions/signal}}:
+
+          1. If |subscriber|'s [=Subscriber/active=] is false, then abort these steps.
+
+          1. [=set/Remove=] |internal observer| from |subscriber|'s [=Subscriber/internal
+             observers=].
+
+          1. If |subscriber|'s [=Subscriber/internal observers=] is [=set/empty=], then [=close a
+             subscription|close=] |subscriber| with |options|'s {{SubscribeOptions/signal}}'s
+             [=AbortSignal/abort reason=].
+
+    1. If [=this=]'s [=Observable/subscribe callback=] is a {{SubscribeCallback}}, then [=invoke=]
+       it with «subscriber» with "`rethrow`".
+
+       If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, call
+       |subscriber|'s {{Subscriber/error()}} method with |E|.
+
+    1. Otherwise, run the steps given by [=this=]'s [=Observable/subscribe callback=], given
+       |subscriber|.
+</div>
+
+<wpt>
+  /dom/observable/tentative/observable-constructor.any.js
+  /dom/observable/tentative/observable-constructor.window.js
+</wpt>
+
+
+<h3 id=operators>Operators</h3>
+
+For now, see
+[https://github.com/wicg/observable#operators](https://github.com/wicg/observable#operators).
+
+<h4 id=observable-from>{{Observable/from()}}</h4>
+
+<div algorithm>
+  The <dfn for=Observable method><code>from(|value|)</code></dfn> method steps are:
+
+    1. Return the result of <a for=Observable lt="convert to an Observable">converting</a> |value|
+       to an {{Observable}}. Rethrow any exceptions.
+</div>
+
+<h4 id=observable-returning-operators>{{Observable}}-returning operators</h4>
+
+<div algorithm>
+  The <dfn for=Observable method><code>takeUntil(|value|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |notifier| be the result of <a for=Observable lt="convert to an Observable">
+       converting</a> |value| to an {{Observable}}.
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       <div class=note>
+         Note that this method involves <a for=Observable lt="subscribe to an
+         Observable">Subscribing</a> to two {{Observable}}s: (1) |notifier|, and (2)
+         |sourceObservable|. We "unsubscribe" from **both** of them in the following situations:
+
+           1. |notifier| starts emitting values (either "next" or "error"). In this case, we
+              unsubscribe from |notifier| since we got all we need from it, and no longer need it to
+              keep producing values. We also unsubscribe from |sourceObservable|, because it no
+              longer needs to produce values that get plumbed through this method's returned
+              |observable|, because we're manually ending the subscription to |observable|, since
+              |notifier| finally produced a value.
+
+           1. |sourceObservable| either {{Subscriber/error()}}s or {{Subscriber/complete()}}s
+              itself. In this case, we unsubscribe from |notifier| since we no longer need to listen
+              for values it emits in order to determine when |observable| can stop mirroring values
+              from |sourceObservable| (since |sourceObservable| ran to completion by itself).
+              Unsubscribing from |sourceObservable| isn't necessary, since its subscription has been
+              exhausted by itself.
+       </div>
+
+       1. Let |notifierObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+             Note: This will "unsubscribe" from |sourceObservable|, if it has been subscribed to by
+             this point. This is because |sourceObservable| is subscribed to with the "outer"
+             |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=] as
+             an input signal, and that signal will get [=AbortSignal/signal abort|aborted=] when the
+             "outer" |subscriber|'s {{Subscriber/complete()}} is called above (and below).
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+          Note: We do not specify [=internal observer/complete steps=], because if the |notifier|
+          {{Observable}} completes itself, we do not need to complete the |subscriber| associated
+          with the |observable| returned from this method. Rather, the |observable| will continue to
+          mirror |sourceObservable| uninterrupted.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |notifier| given
+          |notifierObserver| and |options|.
+
+       1. If |subscriber|'s [=Subscriber/active=] is false, then return.
+
+          Note: This means that |sourceObservable|'s [=Observable/subscribe callback=] will not even
+          get invoked once, if |notifier| synchronously emits a value. If |notifier| only
+          "completes" synchronously though (without emitting a "next" or "error" value), then
+          |subscriber|'s [=Subscriber/active=] will still be true, and we proceed to subscribe to
+          |sourceObservable|, which |observable| will mirror uninterrupted.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in <var
+             ignore>value</var>.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+          Note: |sourceObserver| is mostly a pass-through, mirroring everything that
+          |sourceObservable| emits, with the exception of having the ability to unsubscribe from the
+          |notifier| {{Observable}} in the case where |sourceObservable| is exhausted before
+          |notifier| emits anything.
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-takeUntil.any.js
+    /dom/observable/tentative/observable-takeUntil.window.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>map(|mapper|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. [=Invoke=] |mapper| with «the passed in <var ignore>value</var>, |idx|» and
+                "`rethrow`"; let |mappedValue| be the returned value.
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+             1. Increment |idx|.
+
+             1. Run |subscriber|'s {{Subscriber/next()}} method, given |mappedValue|.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-map.any.js
+    /dom/observable/tentative/observable-map.window.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>filter(|predicate|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. [=Invoke=] |predicate| with «the passed in |value|, |idx|» and "`rethrow`"; let
+                |matches| be the returned value.
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+             1. Set |idx| to |idx| + 1.
+
+             1. If |matches| is true, then run |subscriber|'s {{Subscriber/next()}} method, given
+                |value|.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-filter.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>take(|amount|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |remaining| be |amount|.
+
+       1. If |remaining| is 0, then run |subscriber|'s {{Subscriber/complete()}} method and abort
+          these steps.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. Run |subscriber|'s {{Subscriber/next()}} method with the passed in <var
+                ignore>value</var>.
+
+             1. Decrement |remaining|.
+
+             1. If |remaining| is 0, then run |subscriber|'s {{Subscriber/complete()}} method.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-take.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>drop(|amount|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |remaining| be |amount|.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. If |remaining| is &gt; 0, then decrement |remaining| and abort these steps.
+
+             1. [=Assert=]: |remaining| is 0.
+
+             1. Run |subscriber|'s {{Subscriber/next()}} method with the passed in <var
+                ignore>value</var>.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-drop.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>flatMap(|mapper|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+       1. Let |outerSubscriptionHasCompleted| to a [=boolean=], initially false.
+
+       1. Let |queue| be a new [=list=] of {{any}} values, initially empty.
+
+          Note: This |queue| is used to store any {{Observable}}s emitted by |sourceObservable|,
+          while |observable| is currently subscribed to an {{Observable}} emitted earlier by
+          |sourceObservable| that has not yet been exhausted.
+
+       1. Let |activeInnerSubscription| be a [=boolean=], initially false.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. If |activeInnerSubscription| is true, then:
+
+                1. [=list/Append=] |value| to |queue|.
+
+                   Note: This |value| will eventually be processed once the {{Observable}} that is
+                   currently subscribed-to (as indicated by |activeInnerSubscription|) is exhausted.
+
+             1. Otherwise:
+
+                1. Set |activeInnerSubscription| to true.
+
+                1. Run the [=flatmap process next value steps=] with |value|, |subscriber|,
+                   |mapper|, and <b>references</b> to all of the following: |queue|,
+                   |activeInnerSubscription|, |outerSubscriptionHasCompleted|, and |idx|.
+
+                   <div class=note>
+                     <p>Note: This [=flatmap process next value steps=] will subscribe to the
+                     {{Observable}} derived from |value| (if one such can be derived) and keep
+                     processing values from it until its subscription becomes inactive (either by
+                     error or completion). If this "inner" {{Observable}} completes, then the
+                     processing steps will recursively invoke themselves with the next {{any}} in
+                     |queue|.</p>
+
+                     <p>If no such value [=list/exists=], then the processing steps will terminate,
+                     <b>unsetting</b> |activeInnerSubscription|, so that future values emitted from
+                     |sourceObservable| are processed correctly.</p>
+                   </div>
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: 1. Set |outerSubscriptionHasCompleted| to true.
+
+                Note: If |activeInnerSubscription| is true, then the below step will *not* complete
+                |subscriber|. In that case, the [=flatmap process next value steps=] will be
+                responsible for completing |subscriber| when |queue| is [=list/empty=], after the
+                "inner" subscription becomes inactive.
+
+             1. If |activeInnerSubscription| is false and |queue| is [=list/empty=], run
+                |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+</div>
+
+<div algorithm>
+  The <dfn>flatmap process next value steps</dfn>, given an {{any}} |value|, a {{Subscriber}}
+  |subscriber|, a {{Mapper}} |mapper|, and <b>references</b> to all of the following: a [=list=] of
+  {{any}} values |queue|, a [=boolean=] |activeInnerSubscription|, a [=boolean=]
+  |outerSubscriptionHasCompleted|, and an {{unsigned long long}} |idx|:
+
+    1. Let |mappedResult| be the result of [=invoking=] |mapper| with «|value|, |idx|» and
+       "`rethrow`".
+
+       If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then run
+       |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+    1. Set |idx| to |idx| + 1.
+
+    1. Let |innerObservable| be the result of calling {{Observable/from()}} with |mappedResult|.
+
+       If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then run
+       |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+       Issue: We shouldn't invoke {{Observable/from()}} directly. Rather, we should call some
+       internal algorithm that passes-back the exceptions for us to handle properly here, since we
+       want to pipe them to |subscriber|.
+
+     1. Let |innerObserver| be a new [=internal observer=], initialized as follows:
+
+        : [=internal observer/next steps=]
+        :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in |value|.
+
+        : [=internal observer/error steps=]
+        :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+           ignore>error</var>.
+
+        : [=internal observer/complete steps=]
+        :: 1. If |queue| is not empty, then:
+
+              1. Let |nextValue| be the first item in |queue|; [=list/remove=] remove this item from
+                 |queue|.
+
+              1. Run [=flatmap process next value steps=] given |nextValue|, |subscriber|, |mapper|,
+                 and <b>references</b> to |queue| and |activeInnerSubscription|.
+
+           1. Otherwise:
+
+              1. Set |activeInnerSubscription| to false.
+
+                 Note: Because |activeInnerSubscription| is a reference, this has the effect of
+                 ensuring that all subsequent values emitted from the "outer" {{Observable}} (called
+                 <var ignore>sourceObservable</var>.
+
+              1. If |outerSubscriptionHasCompleted| is true, run |subscriber|'s
+                 {{Subscriber/complete()}} method.
+
+                 Note: This means the "outer" {{Observable}} has already completed, but did not
+                 proceed to complete |subscriber| yet because there was at least one more pending
+                 "inner" {{Observable}} (i.e., |innerObservable|) that had already been queued and
+                 had not yet completed. Until right now!
+
+     1. Let |innerOptions| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+        |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+     1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |innerObservable| given
+        |innerObserver| and |innerOptions|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>switchMap(|mapper|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+       1. Let |outerSubscriptionHasCompleted| be a [=boolean=], initially false.
+
+       1. Let |activeInnerAbortController| be an {{AbortController}}-or-null, initially null.
+
+          Note: This {{AbortController}} is assigned to a new {{AbortController}} only by this
+          algorithm's <a href=#switchmap-next-steps>next steps</a> (below), and only assigned to
+          null by the [=switchmap process next value steps=], when the "inner" {{Observable}} either
+          completes or errors. This variable is used as a marker for whether there is currently an
+          active "inner" subscription. The <a href=#switchmap-complete-steps>complete steps</a>
+          below care about this, because if |sourceObservable| completes while there is an active
+          "inner" subscription, we do not immediately complete |subscriber|. In that case,
+          |subscriber|'s completion becomes blocked on the "inner" subscription's completion.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : <dt id=switchmap-next-steps>[=internal observer/next steps=]</dt>
+          :: 1. If |activeInnerAbortController| is not null, then [=AbortController/signal abort=]
+                |activeInnerAbortController|.
+
+                Note: This "unsubscribes" from the "inner" {{Observable}} that was derived from the
+                value that was <i>last</i> pushed from |sourceObservable|. Then we immediately
+                subscribe to the <i>new</i> {{Observable}} that we're about to derive from |value|,
+                i.e., the <i>most-recently</i> pushed value from |sourceObservable|.
+
+             1. Set |activeInnerAbortController| to a [=new=] {{AbortController}}.
+
+             1. Run the [=switchmap process next value steps=] with |value|, |subscriber|, |mapper|,
+                and <b>references</b> to all of the following: |activeInnerAbortController|,
+                |outerSubscriptionHasCompleted|, and |idx|.
+
+                Note: The [=switchmap process next value steps=] will subscribe to the
+                {{Observable}} derived from |value| (if one such can be derived) and keep processing
+                values from it until either (1) its subscription becomes inactive (either by error
+                or completion), or (2) |activeInnerAbortController| <a
+                href=#switchmap-next-steps>gets aborted</a>, due to |sourceObservable| pushing
+                another <i>newer</i> value that will replace the current "inner" subscription.
+
+          : [=internal observer/error steps=]
+          :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+             ignore>error</var>.
+
+          : <dt id=switchmap-complete-steps>[=internal observer/complete steps=]</dt>
+          :: 1. Set |outerSubscriptionHasCompleted| to true.
+
+                Note: If |activeInnerAbortController| is not null, then we don't immediately
+                complete |subscriber|. Instead, the [=switchmap process next value steps=] will
+                complete |subscriber| when the inner subscription finally completes itself.
+
+             1. If |activeInnerAbortController| is null, run |subscriber|'s
+                {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+</div>
+
+<div algorithm>
+  The <dfn>switchmap process next value steps</dfn>, given an {{any}} |value|, a {{Subscriber}}
+  |subscriber|, a {{Mapper}} |mapper|, and <b>references</b> to all of the following: an
+  {{AbortController}} |activeInnerAbortController|, a [=boolean=] |outerSubscriptionHasCompleted|,
+  and an {{unsigned long long}} |idx| are to run these steps:
+
+    1. Let |mappedResult| be the result of [=invoking=] |mapper| with «|value|, |idx|» and
+       "`rethrow`".
+
+       If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then run
+       |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+    1. Set |idx| to |idx| + 1.
+
+    1. Let |innerObservable| be the result of calling {{Observable/from()}} with |mappedResult|.
+
+       If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then run
+       |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+     1. Let |innerObserver| be a new [=internal observer=], initialized as follows:
+
+        : [=internal observer/next steps=]
+        :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in |value|.
+
+        : [=internal observer/error steps=]
+        :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+           ignore>error</var>.
+
+           Note: We don't have to set |activeInnerAbortController| to null here, to signal to the
+           {{Observable/switchMap()}} method steps above that the inner "subscription" has been
+           canceled. That's because calling |subscriber|'s {{Subscriber/error()}} method already
+           unsubscribes from the "outer" source Observable, so it will not be able to push any more
+           values to the {{Observable/switchMap()}} internal observer.
+
+        : [=internal observer/complete steps=]
+        :: 1. If |outerSubscriptionHasCompleted| is true, run |subscriber|'s
+              {{Subscriber/complete()}} method.
+
+           1. Otherwise, set |activeInnerAbortController| to null.
+
+              Note: Because this variable is a reference, it signals to the <a
+              href=#switchmap-complete-steps>switchMap complete steps</a> that there is no active
+              inner subscription.
+
+     1. Let |innerOptions| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+        result of [=creating a dependent abort signal=] from the list
+        «|activeInnerAbortController|'s [=AbortController/signal=], |subscriber|'s
+        [=Subscriber/subscription controller=]'s [=AbortController/signal=]», using {{AbortSignal}},
+        and the [=current realm=].
+
+     1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |innerObservable| given
+        |innerObserver| and |innerOptions|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>inspect(|inspectorUnion|)</code></dfn> method steps are:
+
+    1. Let |subscribe callback| be a {{VoidFunction}}-or-null, initially null.
+
+    1. Let |next callback| be a {{ObservableSubscriptionCallback}}-or-null, initially null.
+
+    1. Let |error callback| be a {{ObservableSubscriptionCallback}}-or-null, initially null.
+
+    1. Let |complete callback| be a {{VoidFunction}}-or-null, initially null.
+
+    1. Let |abort callback| be a {{ObservableInspectorAbortHandler}}-or-null, initially null.
+
+    1. Process |inspectorUnion| as follows:
+         <dl class="switch">
+           <dt>If |inspectorUnion| is an {{ObservableSubscriptionCallback}}</dt>
+           <dd>
+             1. Set |next callback| to |inspectorUnion|.
+
+           <dt>If |inspectorUnion| is an {{ObservableInspector}}</dt>
+           <dd>
+             1. If {{ObservableInspector/subscribe}} [=map/exists=] in |inspectorUnion|, then set
+                |subscribe callback| to it.
+
+             1. If {{ObservableInspector/next}} [=map/exists=] in |inspectorUnion|, then set |next
+                callback| to it.
+
+             1. If {{ObservableInspector/error}} [=map/exists=] in |inspectorUnion|, then set |error
+                callback| to it.
+
+             1. If {{ObservableInspector/complete}} [=map/exists=] in |inspectorUnion|, then set
+                |complete callback| to it.
+
+             1. If {{ObservableInspector/abort}} [=map/exists=] in |inspectorUnion|, then set |abort
+                callback| to it.
+           </dd>
+         </dl>
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. If |subscribe callback| is not null, then [=invoke=] it with «» and "`rethrow`".
+
+          If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then run
+          |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+          Note: The result of this is that |sourceObservable| is never subscribed to.
+
+       1. If |abort callback| is not null, then [=AbortSignal/add|add the following abort
+          algorithm=] to |subscriber|'s [=Subscriber/subscription controller=]'s
+          [=AbortController/signal=]:
+
+          1. [=Invoke=] |abort callback| with «|subscriber|'s [=Subscriber/subscription
+             controller=]'s [=AbortController/signal=]'s [=AbortSignal/abort reason=]» and "`report`".
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: 1. If |next callback| is not null, then [=invoke=] |next callback| with «the passed in
+                |value|» and "`rethrow`".
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>,
+                then:
+
+                  1. [=AbortSignal/Remove=] |abort callback| from |subscriber|'s
+                     [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+                     Note: This step is important, because the |abort callback| is only meant to be
+                     called for *consumer-initiated* unsubscriptions. When the producer terminates
+                     the subscription (via |subscriber|'s {{Subscriber/error()}} or
+                     {{Subscriber/complete()}} methods) like below, we have to ensure that |abort
+                     callback| is not run.
+
+                     Issue: This matches Chromium's implementation, but consider holding a reference
+                     to the originally-passed-in {{SubscribeOptions}}'s {{SubscribeOptions/signal}}
+                     and just invoking |abort callback| when *it* aborts. The result is likely the
+                     same, but needs investigation.
+
+                  1. Run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these
+                     steps.
+
+             1. Run |subscriber|'s {{Subscriber/next()}} method with the passed in |value|.
+
+          : [=internal observer/error steps=]
+          :: 1. [=AbortSignal/Remove=] |abort callback| from |subscriber|'s
+                [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+             1. If |error callback| is not null, then [=invoke=] |error callback| with «the passed
+                in |error|» and "`rethrow`".
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+             1. Run |subscriber|'s {{Subscriber/error()}} method, given the passed in |error|.
+
+          : [=internal observer/complete steps=]
+          :: 1. [=AbortSignal/Remove=] |abort callback| from |subscriber|'s
+                [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+             1. If |complete callback| is not null, then [=invoke=] |complete callback| with «»
+                and "`rethrow`".
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+             1. Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+
+  <wpt>
+    /dom/observable/tentative/observable-inspect.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>catch(|callback|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in <var
+             ignore>value</var>.
+
+          : [=internal observer/error steps=]
+          ::
+             1. [=Invoke=] |callback| with «the passed in <var ignore>error</var>» and "`rethrow`".
+                Let |result| be the returned value.
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} with |E|, and abort these steps.
+
+             1. Let |innerObservable| be the result of calling {{Observable/from()}} with |result|.
+
+                If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+                run |subscriber|'s {{Subscriber/error()}} method, given |E|, and abort these steps.
+
+                Issue: We shouldn't invoke {{Observable/from()}} directly. Rather, we should call
+                some internal algorithm that passes-back the exceptions for us to handle properly
+                here, since we want to pipe them to |subscriber|.
+
+             1. Let |innerObserver| be a new [=internal observer=], initialized as follows:
+
+                : [=internal observer/next steps=]
+                :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in <var
+                   ignore>value</var>.
+
+                : [=internal observer/error steps=]
+                :: Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+                   ignore>error</var>.
+
+                : [=internal observer/complete steps=]
+                :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+             1. Let |innerOptions| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}}
+                is |subscriber|'s [=Subscriber/subscription controller=]'s
+                [=AbortController/signal=].
+
+             1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |innerObservable|
+                given |innerObserver| and |innerOptions|.
+
+                Note: We're free to subscribe to |innerObservable| here without first
+                "unsubscribing" from |sourceObservable|, and without fear that |sourceObservable|
+                will keep emitting values, because all of this is happening inside of the [=internal
+                observer/error steps=] associated with |sourceObservable|. This means
+                |sourceObservable| has already completed its subscription and will no longer produce
+                any values, and we are free to safely switch our source of values to
+                |innerObservable|.
+
+          : [=internal observer/complete steps=]
+          :: Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>finally(|callback|)</code></dfn> method steps are:
+
+    1. Let |sourceObservable| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}} whose [=Observable/subscribe callback=] is an
+       algorithm that takes a {{Subscriber}} |subscriber| and does the following:
+
+       1. Run |subscriber|'s {{Subscriber/addTeardown()}} method with |callback|.
+
+       1. Let |sourceObserver| be a new [=internal observer=], initialized as follows:
+
+          : [=internal observer/next steps=]
+          :: Run |subscriber|'s {{Subscriber/next()}} method, given the passed in <var
+             ignore>value</var>.
+
+          : [=internal observer/error steps=]
+          :: 1. Run |subscriber|'s {{Subscriber/error()}} method, given the passed in <var
+                ignore>error</var>.
+
+          : [=internal observer/complete steps=]
+          :: 1. Run |subscriber|'s {{Subscriber/complete()}} method.
+
+       1. Let |options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is
+          |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=].
+
+       1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to |sourceObservable|
+          given |sourceObserver| and |options|.
+
+    1. Return |observable|.
+</div>
+
+
+<h4 id=promise-returning-operators>{{Promise}}-returning operators</h4>
+
+<div algorithm>
+  The <dfn for=Observable method><code>toArray(|options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. If |options|'s {{SubscribeOptions/signal}} is not null:
+
+       1. If |options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+          1. [=Reject=] |p| with |options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+             reason=].
+
+          1. Return |p|.
+
+       1. [=AbortSignal/add|Add the following abort algorithm=] to |options|'s
+          {{SubscribeOptions/signal}}:
+
+          1. [=Reject=] |p| with |options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+             reason=].
+
+          Note: All we have to do here is [=reject=] |p|. Note that the subscription to [=this=]
+          {{Observable}} will also be closed automatically, since the "inner" Subscriber gets
+          [=close a subscription|closed=] in response to |options|'s {{SubscribeOptions/signal}}
+          getting [=AbortSignal/signal abort=].
+
+    1. Let |values| be a new [=list=].
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: [=list/Append=] the passed in <var ignore>value</var> to |values|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Resolve=] |p| with |values|.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |options|.
+
+    1. Return |p|.
+
+  <wpt>
+    /dom/observable/tentative/observable-toArray.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>forEach(|callback|, |options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |visitor callback controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|visitor callback
+       controller|'s [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if
+       non-null», using {{AbortSignal}}, and the [=current realm=].
+
+       <div class=note>
+         <p>Many trivial [=internal observers=] act as pass-throughs, and do not control the
+         subscription to the {{Observable}} that they represent; that is, their [=internal
+         observer/error steps=] and [=internal observer/complete steps=] are called when the
+         subscription is terminated, and their [=internal observer/next steps=] simply pass some
+         version of the given value along the chain.</p>
+
+         <p>For this operator, however, the below |observer|'s [=internal observer/next steps=] are
+         responsible for actually aborting the underlying subscription to [=this=], in the event
+         that |callback| throws an exception. In that case, the {{SubscribeOptions}}'s
+         {{SubscribeOptions/signal}} we pass through to "<a for=Observable lt="subscribe to an
+         Observable">Subscribe to an <code>Observable</code></a>", needs to be a [=creating a
+         dependent abort signal|dependent signal=] derived from |options|'s
+         {{SubscribeOptions/signal}}, **and** the {{AbortSignal}} of an {{AbortController}} that the
+         [=internal observer/next steps=] below has access to, and can [=AbortController/signal
+         abort=] when needed.
+       </div>
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+          Note: The fact that rejection of |p| is tied to |internal options|'s
+          {{SubscribeOptions/signal}}, and not |options|'s {{SubscribeOptions/signal}} means, that
+          any [=microtasks=] [=queue a microtask|queued=] during the firing of |options|'s
+          {{SubscribeOptions/signal}}'s {{AbortSignal/abort}} event will run before |p|'s rejection
+          handler runs.
+
+    1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       ::
+          1. [=Invoke=] |callback| with «the passed in <var ignore>value</var>, |idx|» and
+             "`rethrow`".
+
+             If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+             [=reject=] |p| with |E|, and [=AbortController/signal abort=] |visitor callback
+             controller| with |E|.
+
+          1. Increment |idx|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Resolve=] |p| with {{undefined}}.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |internal options|.
+
+    1. Return |p|.
+
+  <wpt>
+    /dom/observable/tentative/observable-forEach.any.js
+  </wpt>
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>every(|predicate|, |options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|controller|'s
+       [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if non-null», using
+       {{AbortSignal}}, and the [=current realm=].
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+    1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: 1. [=Invoke=] |predicate| with «the passed in <var ignore>value</var>, |idx|» and
+             "`rethrow`"; let |passed| be the returned value.
+
+             If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+             [=reject=] |p| with |E|, and [=AbortController/signal abort=] |controller| with |E|.
+
+         1. Set |idx| to |idx| + 1.
+
+         1. If |passed| is false, then [=resolve=] |p| with false, and [=AbortController/signal
+            abort=] |controller|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Resolve=] |p| with true.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |internal options|.
+
+    1. Return |p|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>first(|options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|controller|'s
+       [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if non-null», using
+       {{AbortSignal}}, and the [=current realm=].
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+    1. Let |internal observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: 1. [=Resolve=] |p| with the passed in <var ignore>value</var>.
+
+        1. [=AbortController/Signal abort=] |controller|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Reject=] |p| with a new {{RangeError}}.
+
+          Note: This is only reached when the source {{Observable}} completes *before* it emits a
+          single value.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |internal
+       observer| and |internal options|.
+
+    1. Return |p|.
+
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>last(|options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. If |options|'s {{SubscribeOptions/signal}} is not null:
+
+       1. If |options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+          1. [=Reject=] |p| with |options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+             reason=].
+
+          1. Return |p|.
+
+       1. [=AbortSignal/add|Add the following abort algorithm=] to |options|'s
+          {{SubscribeOptions/signal}}:
+
+          1. [=Reject=] |p| with |options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+             reason=].
+
+    1. Let |lastValue| be an {{any}}-or-null, initially null.
+
+    1. Let |hasLastValue| be a [=boolean=], initially false.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: 1. Set |hasLastValue| to true.
+
+        1. Set |lastValue| to the passed in <var ignore>value</var>.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: 1. If |hasLastValue| is true, [=resolve=] |p| with |lastValue|.
+
+          1. Otherwise, [=reject=] |p| with a new {{RangeError}}.
+
+             Note: See the note in {{Observable/first()}}.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |options|.
+
+    1. Return |p|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>find(|predicate|, |options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|controller|'s
+       [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if non-null», using
+       {{AbortSignal}}, and the [=current realm=].
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+    1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: 1. [=Invoke=] |predicate| with «the passed in |value|, |idx|» and "`rethrow`"; let
+             |passed| be the returned value.
+
+             If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+             [=reject=] |p| with |E|, and [=AbortController/signal abort=] |controller| with |E|.
+
+         1. Set |idx| to |idx| + 1.
+
+         1. If |passed| is true, then [=resolve=] |p| with |value|, and [=AbortController/signal
+            abort=] |controller|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Resolve=] |p| with {{undefined}}.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |internal options|.
+
+    1. Return |p|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>some(|predicate|, |options|)</code></dfn> method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|controller|'s
+       [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if non-null», using
+       {{AbortSignal}}, and the [=current realm=].
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+    1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       :: 1. [=Invoke=] |predicate| with «the passed in <var ignore>value</var>, |idx|» and
+             "`rethrow`"; let |passed| be the returned value.
+
+             If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+             [=reject=] |p| with |E|, and [=AbortController/signal abort=] |controller| with |E|.
+
+         1. Set |idx| to |idx| + 1.
+
+         1. If |passed| is true, then [=resolve=] |p| with true, and [=AbortController/signal
+            abort=] |controller|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: [=Resolve=] |p| with false.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |internal options|.
+
+    1. Return |p|.
+</div>
+
+<div algorithm>
+  The <dfn for=Observable method><code>reduce(|reducer|, |initialValue|, |options|)</code></dfn>
+  method steps are:
+
+    1. Let |p| [=a new promise=].
+
+    1. Let |controller| be a [=new=] {{AbortController}}.
+
+    1. Let |internal options| be a new {{SubscribeOptions}} whose {{SubscribeOptions/signal}} is the
+       result of [=creating a dependent abort signal=] from the list «|controller|'s
+       [=AbortController/signal=], |options|'s {{SubscribeOptions/signal}} if non-null», using
+       {{AbortSignal}}, and the [=current realm=].
+
+    1. If |internal options|'s {{SubscribeOptions/signal}} is [=AbortSignal/aborted=], then:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+       1. Return |p|.
+
+    1. [=AbortSignal/add|Add the following abort algorithm=] to |internal options|'s
+       {{SubscribeOptions/signal}}:
+
+       1. [=Reject=] |p| with |internal options|'s {{SubscribeOptions/signal}}'s [=AbortSignal/abort
+          reason=].
+
+    1. Let |idx| be an {{unsigned long long}}, initially 0.
+
+    1. Let |accumulator| be |initialValue| if it is given, and uninitialized otherwise.
+
+    1. Let |observer| be a new [=internal observer=], initialized as follows:
+
+       : [=internal observer/next steps=]
+       ::
+          1. If |accumulator| is uninitialized (meaning no |initialValue| was passed in), then set
+             |accumulator| to the passed in |value|, set |idx| to |idx| + 1, and abort these steps.
+
+             Note: This means that |reducer| will not be called with the first |value| that [=this=]
+             produces set as the {{Reducer/currentValue}}. Rather, when the *second* value is
+             eventually emitted, we will call |reducer| with *it* as the {{Reducer/currentValue}},
+             and the first value (that we're saving here) as the {{Reducer/accumulator}}.
+
+          1. [=Invoke=] |reducer| with «|accumulator| as {{Reducer/accumulator}}, the passed in
+             |value| as {{Reducer/currentValue}}, |idx| as {{Reducer/index}}» and "`rethrow`". Let
+             |result| be the returned value.
+
+             If <a spec=webidl lt="an exception was thrown">an exception |E| was thrown</a>, then
+             [=reject=] |p| with |E|, and [=AbortController/signal abort=] |controller| with |E|.
+
+          1. Set |idx| to |idx| + 1.
+
+          1. Set |accumulator| to |result|.
+
+       : [=internal observer/error steps=]
+       :: [=Reject=] |p| with the passed in <var ignore>error</var>.
+
+       : [=internal observer/complete steps=]
+       :: 1. If |accumulator| is not "<code>unset</code>", then [=resolve=] |p| with |accumulator|.
+
+          Otherwise, [=reject=] |p| with a {{TypeError}}.
+
+    1. <a for=Observable lt="subscribe to an Observable">Subscribe</a> to [=this=] given |observer|
+       and |internal options|.
+
+    1. Return |p|.
+</div>
+
+
+<h2 id=event-target-integration>{{EventTarget}} integration</h2>
+
+<pre class=idl>
+dictionary ObservableEventListenerOptions {
+  boolean capture = false;
+  boolean passive;
+};
+
+partial interface EventTarget {
+  Observable when(DOMString type, optional ObservableEventListenerOptions options = {});
+};
+</pre>
+
+<div algorithm>
+  The <dfn for=EventTarget method><code>when(|type|, |options|)</code></dfn> method steps are:
+
+    1. If [=this=]'s [=relevant global object=] is a {{Window}} object, and its [=associated
+       Document=] is not [=Document/fully active=], then return.
+
+    1. Let |event target| be [=this=].
+
+    1. Let |observable| be a [=new=] {{Observable}}, initialized as follows:
+
+       : [=Observable/subscribe callback=]
+       :: An algorithm that takes a {{Subscriber}} |subscriber| and runs these steps:
+
+            1. If |event target| is null, abort these steps.
+
+               Note: This is meant to capture the fact that |event target| can be garbage collected
+               by the time this algorithm runs upon subscription.
+
+            1. If |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=]
+               is [=AbortSignal/aborted=], abort these steps.
+
+            1. [=Add an event listener=] with |event target| and an [=event listener=] defined as
+               follows:
+
+               : [=event listener/type=]
+               :: |type|
+
+               : [=event listener/callback=]
+               :: The result of creating a new Web IDL {{EventListener}} instance representing a
+                  reference to a function of one argument of type {{Event}} |event|. This function
+                  executes the [=observable event listener invoke algorithm=] given |subscriber| and
+                  |event|.
+
+               : [=event listener/capture=]
+               :: |options|'s {{ObservableEventListenerOptions/capture}}
+
+               : [=event listener/passive=]
+               :: |options|'s {{ObservableEventListenerOptions/passive}} if this member
+                  [=map/exists=]; null otherwise.
+
+               : [=event listener/once=]
+               :: false
+
+               : [=event listener/signal=]
+               :: |subscriber|'s [=Subscriber/subscription controller=]'s [=AbortController/signal=]
+
+                  Note: This ensures that the [=event listener=] is cleaned up when
+                  [=Subscriber/subscription controller=]'s [=AbortController/signal=] is
+                  [=AbortSignal/aborted=], regardless of an engine's ownership model.
+
+    1. Return |observable|.
+</div>
+
+<div algorithm>
+  The <dfn>observable event listener invoke algorithm</dfn> takes a {{Subscriber}} |subscriber| and
+  an {{Event}} |event|, and runs these steps:
+
+    1. Run |subscriber|'s {{Subscriber/next()}} method with |event|.
+</div>
+
+<wpt>
+  /dom/observable/tentative/observable-event-target.any.js
+  /dom/observable/tentative/observable-event-target.window.js
+</wpt>
+
+
+<h2 id=security-and-privacy>Security & Privacy Considerations</h2>
+
+This material is being upstreamed from our explainer into this specification, and in the meantime
+you can consult the following resources:
+
+ * [TAG Security/Privacy
+   Questionnaire](https://github.com/WICG/observable/blob/master/security-privacy-questionnaire.md)
+
+<h2 id=acks>Acknowledgements</h2>
+
+A special thanks to [Ben Lesh](https://benlesh.com/) for much of the design input for the
+{{Observable}} API, and his many years of work maintaining userland Observable code that made this
+contribution to the web platform possible.
