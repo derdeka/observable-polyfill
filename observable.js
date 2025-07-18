@@ -10,7 +10,29 @@ const [Observable, Subscriber] = (() => {
 
   const reportError = "reportError" in globalThis && globalThis.reportError || console.error;
 
-  const anySignal = (signals) => AbortSignal.any(signals.filter(Boolean));
+  function anySignal(signalArray) {
+    // remove null or undefined signals, simplifies usage of anySignal
+    const signals = signalArray.filter(Boolean);
+    // if AbortSignal.any() is available, use it.
+    // if ("any" in AbortSignal) return AbortSignal.any(signals); // TODO: test "forEach visitor callback rejection microtask ordering" fails when using AbortSignal.any()
+    // otherwise, create a signal that will abort when any of the signals aborts.
+    const ac = new AbortController();
+    // when any of the signals is already aborted, abort ac immediately and return its signal.
+    for (const signal of signals) {
+      if (signal.aborted) {
+        ac.abort(signal.reason);
+        return ac.signal;
+      }
+    }
+    // otherwise, add an abort listener to each signal that will abort ac.
+    for (const signal of signals) {
+      signal.addEventListener("abort", () => {
+        ac.abort(signal.reason);
+      }, { signal: ac.signal });
+    }
+    // return the signal.
+    return ac.signal;
+  };
 
   const privateState = new WeakMap();
 
