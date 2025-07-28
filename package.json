@@ -45,6 +45,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.54.1",
-    "esbuild": "^0.25.2"
+    "esbuild": "^0.25.8"
   }
 }

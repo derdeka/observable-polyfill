@@ -19,6 +19,14 @@ test('run wpt test', async ({ page }) => {
   expect(tests).toBeDefined();
   expect(tests.length).toBeGreaterThan(0);
 
+  test.info().annotations.push(
+    { type: 'numTests', description: tests.length },
+    { type: 'numPass', description: tests.filter(test => test.status == 0).length },
+    { type: 'numFail', description: tests.filter(test => test.status == 1).length },
+    { type: 'numTimeout', description: tests.filter(test => test.status == 2).length },
+    { type: 'nomNotRun', description: tests.filter(test => test.status == 3).length },
+  );
+
   for (const test of tests) {
     expect.soft(test.name).toBeDefined();
     expect.soft(test.status, test.name).toBe(0);
