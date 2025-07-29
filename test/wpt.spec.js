@@ -7,13 +7,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_HOST = 'http://localhost';
 
 test('run wpt test', async ({ page }) => {
+  // adding a route to serve local files without a web server
   await page.route(`${MOCK_HOST}/**`, async route => {
     const pathname = new URL(route.request().url()).pathname.substring(1);
     await route.fulfill({ path: resolve(__dirname, '..', pathname) });
   });
 
+  // adding the polyfill to the page and all created iframes
+  await page.addInitScript(async (MOCK_HOST) => {
+      await import(`${MOCK_HOST}/observable.js`).then(({ apply }) => apply());
+  }, MOCK_HOST);
+
+  // open the test page
   await page.goto(`${MOCK_HOST}/test/index.html`);
 
+  // wait testharness to complete
   const { tests, status } = await page.evaluate(async () => await testComplete);
 
   expect(tests).toBeDefined();
